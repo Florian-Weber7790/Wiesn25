@@ -14,8 +14,7 @@ from io import BytesIO
 # Konfiguration (über ENV variabel)
 # ------------------------------------------------------------------------------
 def _get_env(key, default=None):
-    v = os.getenv(key, default)
-    return v
+    return os.getenv(key, default)
 
 def _get_env_float(key, default):
     try:
@@ -42,13 +41,13 @@ MITARBEITER = [
     ).split(",") if m.strip()
 ]
 
-# Zeitraum für Daten, die erfasst werden dürfen
+# Zeitraum für gültige Datensätze (welche Tage überhaupt gespeichert werden dürfen)
 DATA_START = _get_env_date("DATA_START", "2025-09-20")
-DATA_END   = _get_env_date("DATA_END", "2025-10-05")
+DATA_END   = _get_env_date("DATA_END",   "2025-10-05")
 
-# Zeitraum, in dem das Formular bearbeitet werden darf
+# Zeitraum, in dem Bearbeitung erlaubt ist (heutiges Datum)
 EDIT_START = _get_env_date("EDIT_START", "2025-09-18")
-EDIT_END   = _get_env_date("EDIT_END", "2025-10-07")
+EDIT_END   = _get_env_date("EDIT_END",   "2025-10-07")
 
 # ------------------------------------------------------------------------------
 # App
@@ -72,16 +71,13 @@ def get_db():
             DATABASE_PATH, timeout=30.0, check_same_thread=False
         )
         db.row_factory = sqlite3.Row
-        # Bessere Concurrent-Reads/Writes
         db.execute("PRAGMA journal_mode=WAL;")
         db.execute("PRAGMA synchronous=NORMAL;")
     return db
 
-@app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, "_database", None)
-    if db is not None:
-        db.close()
+def column_exists(db, table, colname):
+    cur = db.execute(f"PRAGMA table_info({table})")
+    return any(r["name"] == colname for r in cur.fetchall())
 
 def init_db():
     db = get_db()
@@ -95,15 +91,24 @@ def init_db():
             bier INTEGER,
             alkoholfrei INTEGER,
             hendl INTEGER,
-            steuer REAL,
             gesamt REAL,
             bar_entnommen REAL,
             tagessumme REAL,
             gespeichert INTEGER,
+            steuer REAL,
             UNIQUE(datum, mitarbeiter)
         )
     """)
+    # Migration: Spalte 'steuer' sicherstellen (falls alte DB ohne diese Spalte existiert)
+    if not column_exists(db, "eintraege", "steuer"):
+        db.execute("ALTER TABLE eintraege ADD COLUMN steuer REAL;")
     db.commit()
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, "_database", None)
+    if db is not None:
+        db.close()
 
 # Beim Import (auch unter Gunicorn) sicherstellen, dass die DB-Struktur existiert
 with app.app_context():
@@ -132,6 +137,7 @@ def login():
         if name in MITARBEITER:
             session["name"] = name
             session["admin"] = False
+            # Standard: heutiges Datum anzeigen
             return redirect(url_for("eingabe", datum=str(date.today())))
 
     return render_template_string("""
@@ -167,7 +173,7 @@ def eingabe(datum):
 
     datum_obj = date.fromisoformat(datum)
 
-    # Prüfen, ob Speichern erlaubt ist
+    # Bearbeitung nur erlaubt, wenn heutiges Datum im Edit-Fenster liegt UND das gewählte Datum im Datenbereich
     bearbeitung_erlaubt = (
         EDIT_START <= date.today() <= EDIT_END
         and DATA_START <= datum_obj <= DATA_END
@@ -194,7 +200,7 @@ def eingabe(datum):
         bier = int(request.form.get("bier", 0) or 0)
         alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
         hendl = int(request.form.get("hendl", 0) or 0)
-        steuer = float(request.form.get("steuer", 0) or 0)
+        steuer = float(request.form.get("steuer", 0) or 0)  # nur mittwochs sichtbar, Wert sonst 0
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
 
         gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL)
@@ -242,53 +248,101 @@ def eingabe(datum):
 
     vortag_link = (datum_obj - timedelta(days=1)).isoformat()
     folgetag_link = (datum_obj + timedelta(days=1)).isoformat()
-
     wochentag = datum_obj.strftime("%A")
 
     return render_template_string("""
+        <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        input { padding: 5px; margin: 5px; }
+        .editable { background-color: orange; }
+        .readonly { background-color: #ddd; }
+        .calc-field { background-color: #eee; }
+        button { padding: 8px 12px; margin-top: 10px; }
+        a.nav-btn { padding: 8px 12px; margin: 5px; background-color: #ccc; text-decoration: none; border-radius: 5px; }
+        </style>
+
+        <script>
+        function berechne() {
+            let preisBier = {{preis_bier}};
+            let preisAlk = {{preis_alk}};
+            let preisHendl = {{preis_hendl}};
+
+            let bar = parseFloat(document.getElementById("bar").value) || 0;
+            let bier = parseInt(document.getElementById("bier").value) || 0;
+            let alkoholfrei = parseInt(document.getElementById("alkoholfrei").value) || 0;
+            let hendl = parseInt(document.getElementById("hendl").value) || 0;
+            let barEntnommen = parseFloat(document.getElementById("bar_entnommen").value) || 0;
+
+            let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl);
+            let tagessumme = gesamt - barEntnommen;
+
+            document.getElementById("gesamt").value = gesamt.toFixed(2);
+            document.getElementById("tagessumme").value = tagessumme.toFixed(2);
+        }
+        function springeZuDatum(){
+            let d = document.getElementById("datumsauswahl").value;
+            if(d){
+                window.location.href = "/eingabe/" + d;
+            }
+        }
+        window.addEventListener('load', berechne);
+        </script>
+
         <h2>Eingabe für {{datum}} - {{name}}</h2>
         <div>
-            <a href="{{ url_for('eingabe', datum=vortag_link) }}">← Vortag</a>
-            <a href="{{ url_for('eingabe', datum=folgetag_link) }}">Folgetag →</a>
-            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="springeZuDatum()">
+            <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="nav-btn">← Vortag</a>
+            <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="nav-btn">Folgetag →</a>
+            <input type="date"
+                   id="datumsauswahl"
+                   value="{{datum}}"
+                   min="{{data_start}}"
+                   max="{{data_end}}"
+                   onchange="springeZuDatum()">
         </div>
 
         <form method="post" oninput="berechne()">
             Summe Start:
             <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
+                   class="{% if bearbeitung_erlaubt and datum == data_start and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or datum != data_start or gespeichert %}readonly{% endif %}><br><br>
 
             Bar (€):
             <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}"
+                   class="{% if bearbeitung_erlaubt and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Bier (Anzahl):
             <input type="number" id="bier" name="bier" value="{{bier}}"
+                   class="{% if bearbeitung_erlaubt and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Alkoholfrei (Anzahl):
             <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}"
+                   class="{% if bearbeitung_erlaubt and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Hendl (Anzahl):
             <input type="number" id="hendl" name="hendl" value="{{hendl}}"
+                   class="{% if bearbeitung_erlaubt and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             {% if wochentag == "Wednesday" %}
             Steuer (€):
             <input type="number" step="0.01" name="steuer" value="{{steuer}}"
+                   class="{% if bearbeitung_erlaubt and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
             {% endif %}
 
             Gesamt (€):
-            <input type="number" step="0.01" id="gesamt" readonly><br><br>
+            <input type="number" step="0.01" id="gesamt" readonly class="calc-field"><br><br>
 
             Bar entnommen (€):
             <input type="number" step="0.01" id="bar_entnommen" name="bar_entnommen" value="{{bar_entnommen}}"
+                   class="{% if bearbeitung_erlaubt and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Tagessumme (€):
-            <input type="number" step="0.01" id="tagessumme" readonly><br><br>
+            <input type="number" step="0.01" id="tagessumme" readonly class="calc-field"><br><br>
 
             {% if bearbeitung_erlaubt and not gespeichert %}
             <button type="submit">Speichern</button>
@@ -299,8 +353,10 @@ def eingabe(datum):
     """, datum=datum, name=session["name"], summe_start=summe_start, bar=bar, bier=bier,
        alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer, bar_entnommen=bar_entnommen,
        gespeichert=gespeichert, vortag_link=vortag_link, folgetag_link=folgetag_link,
-       bearbeitung_erlaubt=bearbeitung_erlaubt, data_start=DATA_START.isoformat(),
-       data_end=DATA_END.isoformat(), edit_start=EDIT_START.isoformat(), edit_end=EDIT_END.isoformat(),
+       bearbeitung_erlaubt=bearbeitung_erlaubt,
+       preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
+       data_start=DATA_START.isoformat(), data_end=DATA_END.isoformat(),
+       edit_start=EDIT_START.isoformat(), edit_end=EDIT_END.isoformat(),
        wochentag=wochentag)
 
 # ------------------------------------------------------------------------------
@@ -325,10 +381,8 @@ def admin_view():
     rows_with_diff = []
     prev_sum = None
     for r in rows:
-        current_sum = r["tag_summe"] or 0
-        diff = None
-        if prev_sum is not None:
-            diff = current_sum - prev_sum
+        current_sum = float(r["tag_summe"] or 0)
+        diff = None if prev_sum is None else current_sum - prev_sum
         rows_with_diff.append({
             "datum": r["datum"],
             "tag_summe": current_sum,
@@ -339,6 +393,12 @@ def admin_view():
     gesamt_summe = sum(r["tag_summe"] for r in rows_with_diff if r["tag_summe"] is not None)
 
     return render_template_string("""
+        <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        table { border-collapse: collapse; width: 65%; }
+        th, td { border: 1px solid #ccc; padding: 5px; text-align: center; }
+        th { background-color: #eee; }
+        </style>
         <h2>Gesamtsummen pro Tag</h2>
         <table>
             <tr>
@@ -367,9 +427,8 @@ def admin_view():
         </form>
     """, rows=rows_with_diff, gesamt_summe=gesamt_summe)
 
-
 # ------------------------------------------------------------------------------
-# Excel-Export
+# Excel-Export – mit Differenz-Spalte & dynamischem Dateinamen
 # ------------------------------------------------------------------------------
 @app.route("/export_excel")
 def export_excel():
@@ -386,21 +445,29 @@ def export_excel():
         ORDER BY datum
     """).fetchall()
 
+    # Differenzen vorbereiten
+    processed = []
+    prev_sum = None
+    for r in rows:
+        current_sum = float(r["tag_summe"] or 0)
+        diff = None if prev_sum is None else current_sum - prev_sum
+        processed.append((r["datum"], current_sum, diff))
+        prev_sum = current_sum
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Gesamtsummen"
-    ws.append(["Datum", "Gesamtsumme (€)"])
-    for row in rows:
-        ws.append([row["datum"], float(row["tag_summe"] or 0)])
+    ws.append(["Datum", "Gesamtsumme (€)", "Differenz zum Vortag (€)"])
+    for d, s, diff in processed:
+        ws.append([d, s, ("" if diff is None else diff)])
     ws.append([])
-    ws.append(["GESAMTSUMME ALLE TAGE", sum(float(row["tag_summe"] or 0) for row in rows)])
+    ws.append(["GESAMTSUMME ALLE TAGE", sum(s for _, s, _ in processed)])
 
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
-    # Dateiname mit heutigem Tagesdatum (YYYY-MM-DD)
-    today_str = date.today().isoformat()               # z.B. 2025-08-15
+    today_str = date.today().isoformat()   # YYYY-MM-DD
     filename = f"Wiesn25_Gesamt_{today_str}.xlsx"
 
     return send_file(
@@ -410,11 +477,8 @@ def export_excel():
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-
 # ------------------------------------------------------------------------------
 # Lokaler Start
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Lokal mit Flask Dev-Server starten (für Render nutzt du Gunicorn, siehe unten)
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
-
