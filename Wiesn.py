@@ -43,6 +43,23 @@ MITARBEITER = [
     ).split(",") if m.strip()
 ]
 
+def _parse_password_map(default_names):
+    # Erwartet ENV: MITARBEITER_PASSWORDS="Julia:pw1,Regina:pw2,Florian:pw3"
+    raw = os.getenv("MITARBEITER_PASSWORDS", "")
+    mp = {}
+    for chunk in raw.split(","):
+        if ":" in chunk:
+            name, pw = chunk.split(":", 1)
+            name, pw = name.strip(), pw.strip()
+            if name and pw:
+                mp[name] = pw
+    # Falls für manche Namen nichts in ENV steht, lege Dummy-PWs
+    for n in default_names:
+        mp.setdefault(n, f"{n.lower()}123")
+    return mp
+
+MITARBEITER_PASSWOERTER = _parse_password_map(MITARBEITER)
+
 # Demo-Modus: auf Render zum Testen DEMO_MODE=1 setzen
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 if DEMO_MODE:
@@ -178,37 +195,70 @@ def eingabe(datum):
 
     datum_obj = date.fromisoformat(datum)
 
-    # Erlaubte Bearbeitungs- und Anzeigebereiche
+    # Zeitfenster (Produktivvorgaben)
     DATA_START = date(2025, 9, 20)
-    DATA_END = date(2025, 10, 5)
-    BEARBEITUNG_START = date(2025, 9, 18)
-    BEARBEITUNG_END = date(2025, 10, 7)
+    DATA_END   = date(2025, 10, 5)
+    WIN_START  = date(2025, 9, 18)
+    WIN_END    = date(2025, 10, 7)
 
-    im_erlaubten_tag = DATA_START <= datum_obj <= DATA_END
-    im_bearbeitungszeitraum = BEARBEITUNG_START <= date.today() <= BEARBEITUNG_END
+    tag_im_erlaubten_bereich = DATA_START <= datum_obj <= DATA_END
+    heute_im_bearb_fenster   = WIN_START <= date.today() <= WIN_END
 
-    # Demo-Modus überschreibt Zeitprüfung
+    # Demo: Bearbeiten erlaubt, sobald Tag im erlaubten Bereich liegt
     if DEMO_MODE:
-        im_edit_zeitraum = im_erlaubten_tag
+        im_edit_zeitraum = tag_im_erlaubten_bereich
     else:
-        im_edit_zeitraum = im_bearbeitungszeitraum and im_erlaubten_tag
-
-    is_wednesday = datum_obj.weekday() == 2  # 0=Mo ... 2=Mi
+        im_edit_zeitraum = heute_im_bearb_fenster and tag_im_erlaubten_bereich
 
     db = get_db()
+    # Wenn Admin drin ist, bearbeiten wir "als Admin" – sonst als Mitarbeiter
+    aktiver_user = session.get("name", "ADMIN")
     row = db.execute(
         "SELECT * FROM eintraege WHERE datum=? AND mitarbeiter=?",
-        (datum, session.get("name", "ADMIN"))
+        (datum, aktiver_user)
     ).fetchone()
 
-    if request.method == "POST" and im_edit_zeitraum and (not row or row["gespeichert"] == 0):
+    # ------------------------ POST: SAVE oder UNLOCK ------------------------
+    action = request.form.get("action")  # "save" oder "unlock"
+
+    # 1) UNLOCK: Gespeicherte Zeile wieder bearbeitbar machen (gespeichert=0), Passwort prüfen
+    if request.method == "POST" and action == "unlock":
+        # nur innerhalb des Editfensters darf freigeschaltet werden
+        if not im_edit_zeitraum:
+            return "Freischalten derzeit nicht erlaubt (außerhalb des Bearbeitungszeitraums).", 403
+
+        if not row:
+            return "Kein Eintrag vorhanden, den man freischalten könnte.", 400
+
+        entered = (request.form.get("edit_pw") or "").strip()
+        ok = False
+        # Admin darf mit ADMIN_PASSWORT freischalten
+        if session.get("admin"):
+            ok = (entered == ADMIN_PASSWORT)
+        else:
+            # Mitarbeiter muss sein eigenes Passwort eingeben
+            expected = MITARBEITER_PASSWOERTER.get(aktiver_user)
+            ok = (entered and expected and entered == expected)
+
+        if not ok:
+            # Zurück auf die Seite mit Fehlermeldung
+            fehler = "Falsches Passwort – Freischalten abgebrochen."
+            gespeichert = row["gespeichert"] if row else 0
+            # (wir rendern unten regulär; Fehlermeldung geben wir über Template aus)
+        else:
+            db.execute("UPDATE eintraege SET gespeichert=0 WHERE id=?", (row["id"],))
+            db.commit()
+            return redirect(url_for("eingabe", datum=datum))
+
+    # 2) SAVE: normalen Datensatz speichern (nur wenn erlaubt und (neu oder entsperrt))
+    if request.method == "POST" and action == "save" and im_edit_zeitraum and (not row or row["gespeichert"] == 0):
         if datum_obj == DATA_START:
             summe_start = float(request.form.get("summe_start", 0) or 0)
         else:
             vortag = datum_obj - timedelta(days=1)
             vortag_row = db.execute(
                 "SELECT tagessumme FROM eintraege WHERE datum=? AND mitarbeiter=?",
-                (vortag.isoformat(), session.get("name", "ADMIN"))
+                (vortag.isoformat(), aktiver_user)
             ).fetchone()
             summe_start = float(vortag_row["tagessumme"] if vortag_row else 0)
 
@@ -216,7 +266,8 @@ def eingabe(datum):
         bier = int(request.form.get("bier", 0) or 0)
         alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
         hendl = int(request.form.get("hendl", 0) or 0)
-        steuer = float(request.form.get("steuer", 0) or 0) if is_wednesday else 0
+        # Steuer nur mittwochs sichtbar; falls Feld nicht da ist → 0
+        steuer = float(request.form.get("steuer", 0) or 0)
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
 
         gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL) - steuer
@@ -236,16 +287,17 @@ def eingabe(datum):
                 (datum, mitarbeiter, summe_start, bar, bier, alkoholfrei, hendl, steuer,
                  gesamt, bar_entnommen, tagessumme, gespeichert)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
-            """, (datum, session.get("name", "ADMIN"), summe_start, bar, bier, alkoholfrei,
-                  hendl, steuer, gesamt, bar_entnommen, tagessumme))
+            """, (datum, aktiver_user, summe_start, bar, bier, alkoholfrei, hendl, steuer,
+                  gesamt, bar_entnommen, tagessumme))
         db.commit()
 
+        # Weiterleitung abhängig vom User-Typ
         if session.get("admin"):
             return redirect(url_for("admin_view"))
         else:
             return redirect(url_for("login"))
 
-    # Werte für Formular vorbereiten
+    # ------------------------ GET-Anzeige vorbereiten ------------------------
     if row:
         summe_start = row["summe_start"] or 0
         bar = row["bar"] or 0
@@ -258,22 +310,29 @@ def eingabe(datum):
         tagessumme = row["tagessumme"] or 0
         gespeichert = row["gespeichert"] or 0
     else:
+        # Voreinstellungen für neuen Eintrag
         if datum_obj == DATA_START:
             summe_start = 0
         else:
             vortag = datum_obj - timedelta(days=1)
             vortag_row = db.execute(
                 "SELECT tagessumme FROM eintraege WHERE datum=? AND mitarbeiter=?",
-                (vortag.isoformat(), session.get("name", "ADMIN"))
+                (vortag.isoformat(), aktiver_user)
             ).fetchone()
             summe_start = float(vortag_row["tagessumme"] if vortag_row else 0)
         bar = bier = alkoholfrei = hendl = steuer = bar_entnommen = 0
-        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL)
+        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL) - steuer
         tagessumme = gesamt - bar_entnommen
         gespeichert = 0
 
+    # Mittwoch?
+    is_wednesday = (datum_obj.weekday() == 2)
+
     vortag_link = (datum_obj - timedelta(days=1)).isoformat()
     folgetag_link = (datum_obj + timedelta(days=1)).isoformat()
+
+    # Optionale Fehlermeldung aus Unlock-Pfad
+    fehler_msg = locals().get("fehler", "")
 
     return render_template_string("""
         <style>
@@ -284,6 +343,7 @@ def eingabe(datum):
         .calc-field { background-color: #eee; }
         button { padding: 8px 12px; margin-top: 10px; }
         a.nav-btn { padding: 8px 12px; margin: 5px; background-color: #ccc; text-decoration: none; border-radius: 5px; }
+        .error { color: #b00020; margin: 10px 0; }
         </style>
 
         <script>
@@ -291,12 +351,12 @@ def eingabe(datum):
             let preisBier = {{preis_bier}};
             let preisAlk = {{preis_alk}};
             let preisHendl = {{preis_hendl}};
-            let steuer = parseFloat(document.getElementById("steuer")?.value) || 0;
-
             let bar = parseFloat(document.getElementById("bar").value) || 0;
             let bier = parseInt(document.getElementById("bier").value) || 0;
             let alkoholfrei = parseInt(document.getElementById("alkoholfrei").value) || 0;
             let hendl = parseInt(document.getElementById("hendl").value) || 0;
+            let steuerEl = document.getElementById("steuer");
+            let steuer = steuerEl ? (parseFloat(steuerEl.value) || 0) : 0;
             let barEntnommen = parseFloat(document.getElementById("bar_entnommen").value) || 0;
 
             let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl) - steuer;
@@ -305,45 +365,53 @@ def eingabe(datum):
             document.getElementById("gesamt").value = gesamt.toFixed(2);
             document.getElementById("tagessumme").value = tagessumme.toFixed(2);
         }
+        window.addEventListener('load', berechne);
         </script>
 
-        <h2>Eingabe für {{datum}} - {{name if name else 'ADMIN'}}</h2>
+        <h2>Eingabe für {{datum}} – {{name}}</h2>
         <div>
             <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="nav-btn">← Vortag</a>
             <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="nav-btn">Folgetag →</a>
-            <input type="date" id="datumsauswahl" value="{{datum}}" min="2025-09-01" max="2025-10-31" onchange="window.location.href='/eingabe/' + this.value">
+            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
         </div>
 
+        {% if fehler_msg %}
+          <div class="error">{{ fehler_msg }}</div>
+        {% endif %}
+
+        <!-- Hauptformular: action=save -->
         <form method="post" oninput="berechne()">
+            <input type="hidden" name="action" value="save">
+
             Summe Start:
             <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
-                   class="{{ 'editable' if im_edit_zeitraum and datum == '2025-09-20' and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and datum == '2025-09-20' and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or datum != '2025-09-20' or gespeichert %}readonly{% endif %}><br><br>
 
             Bar (€):
             <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}" min="0"
-                   class="{{ 'editable' if im_edit_zeitraum and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
 
             Bier (Anzahl):
             <input type="number" id="bier" name="bier" value="{{bier}}" min="0"
-                   class="{{ 'editable' if im_edit_zeitraum and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
 
             Alkoholfrei (Anzahl):
             <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}" min="0"
-                   class="{{ 'editable' if im_edit_zeitraum and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
 
             Hendl (Anzahl):
             <input type="number" id="hendl" name="hendl" value="{{hendl}}" min="0"
-                   class="{{ 'editable' if im_edit_zeitraum and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
 
             {% if is_wednesday %}
             Steuer (€):
             <input type="number" step="0.01" id="steuer" name="steuer" value="{{steuer}}" min="0"
-                   class="{{ 'editable' if im_edit_zeitraum and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
             {% endif %}
 
@@ -352,26 +420,43 @@ def eingabe(datum):
 
             Bar entnommen (€):
             <input type="number" step="0.01" id="bar_entnommen" name="bar_entnommen" value="{{bar_entnommen}}" min="0"
-                   class="{{ 'editable' if im_edit_zeitraum and not gespeichert else 'readonly' }}"
+                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                    {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
 
             Tagessumme (€):
             <input type="number" step="0.01" id="tagessumme" readonly class="calc-field" value="{{ '%.2f' % tagessumme }}"><br><br>
 
             {% if im_edit_zeitraum and not gespeichert %}
-            <button type="submit">Speichern</button>
+              <button type="submit">Speichern</button>
             {% else %}
-            <p><b>Bearbeitung nur vom {{BEARBEITUNG_START}} bis {{BEARBEITUNG_END}} möglich.</b></p>
+              <p><b>Bearbeitung nur vom {{WIN_START}} bis {{WIN_END}} (für Daten {{DATA_START}}–{{DATA_END}}). Bereits gespeicherten Tag zum Editieren freischalten.</b></p>
             {% endif %}
         </form>
-    """, datum=datum, name=session.get("name"),
+
+        <!-- Editieren-Formular: erscheint nur, wenn bereits gespeichert -->
+        {% if gespeichert %}
+          <hr>
+          <h3>Eintrag bearbeiten</h3>
+          <form method="post">
+            <input type="hidden" name="action" value="unlock">
+            <label>Passwort für {{name}}{% if admin %} / Admin{% endif %}:</label>
+            <input type="password" name="edit_pw" autocomplete="current-password" required>
+            <button type="submit">Editieren freischalten</button>
+          </form>
+        {% endif %}
+    """,
+       datum=datum,
+       name=aktiver_user,
+       admin=session.get("admin", False),
        summe_start=summe_start, bar=bar, bier=bier,
-       alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer, bar_entnommen=bar_entnommen,
-       gesamt=gesamt, tagessumme=tagessumme, gespeichert=gespeichert,
+       alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer,
+       bar_entnommen=bar_entnommen, gesamt=gesamt, tagessumme=tagessumme,
+       gespeichert=gespeichert,
        preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
        vortag_link=vortag_link, folgetag_link=folgetag_link,
        im_edit_zeitraum=im_edit_zeitraum, is_wednesday=is_wednesday,
-       BEARBEITUNG_START=BEARBEITUNG_START.isoformat(), BEARBEITUNG_END=BEARBEITUNG_END.isoformat())
+       WIN_START=WIN_START.isoformat(), WIN_END=WIN_END.isoformat(),
+       DATA_START=DATA_START.isoformat(),
 
 
 # ------------------------------------------------------------------------------
