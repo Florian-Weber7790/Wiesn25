@@ -441,7 +441,6 @@ def export_excel():
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    )
 
 # ------------------------------------------------------------------------------
 # Lokaler Start
