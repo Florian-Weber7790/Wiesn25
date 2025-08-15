@@ -69,7 +69,7 @@ DATA_END   = _get_env_date("DATA_END",   "2025-10-05")
 EDIT_WINDOW_START = _get_env_date("EDIT_WINDOW_START", "2025-09-18") # Zeitraum, in dem Bearbeitung grundsätzlich erlaubt ist
 EDIT_WINDOW_END   = _get_env_date("EDIT_WINDOW_END",   "2025-10-07")
 
-# Demo-Modus: erlaubt alles jederzeit
+# Demo-Modus: erlaubt alles jederzeit (Steuerfeld trotzdem nur mittwochs sichtbar)
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 
@@ -159,29 +159,46 @@ def login():
             return redirect(url_for("eingabe", datum=str(date.today())))
 
     return render_template_string("""
-        <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        select, input { padding: 6px 8px; margin: 6px 0; }
-        button { padding: 8px 12px; }
-        </style>
-        <h2>Login</h2>
-        <form method="post">
-            <label>Mitarbeiter:</label><br>
-            <select name="name">
-                <option value="">-- auswählen --</option>
-                {% for m in mitarbeiter %}
-                <option value="{{m}}">{{m}}</option>
-                {% endfor %}
-            </select>
-            <br><br>
-            <label>Oder Admin Passwort:</label><br>
-            <input type="password" name="admin_pw" autocomplete="current-password">
-            <br><br>
-            <button type="submit">Login</button>
-        </form>
-        {% if demo_mode %}
-          <p style="margin-top:1rem;color:#555;">Demo-Modus aktiv: Bearbeitung jederzeit erlaubt.</p>
-        {% endif %}
+        <!doctype html>
+        <html lang="de">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+          <title>Login</title>
+        </head>
+        <body class="bg-light">
+        <div class="container py-5">
+          <div class="row justify-content-center">
+            <div class="col-12 col-md-6">
+              <div class="card shadow-sm">
+                <div class="card-body">
+                  <h3 class="mb-3">Login</h3>
+                  <form method="post">
+                    <div class="mb-3">
+                      <label class="form-label">Mitarbeiter</label>
+                      <select name="name" class="form-select">
+                        <option value="">-- auswählen --</option>
+                        {% for m in mitarbeiter %}<option value="{{m}}">{{m}}</option>{% endfor %}
+                      </select>
+                    </div>
+                    <div class="text-center my-2">oder</div>
+                    <div class="mb-3">
+                      <label class="form-label">Admin Passwort</label>
+                      <input type="password" class="form-control" name="admin_pw" autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Einloggen</button>
+                  </form>
+                  {% if demo_mode %}
+                    <div class="alert alert-info mt-3 mb-0">Demo-Modus aktiv: Bearbeitung jederzeit erlaubt (Steuer nur mittwochs sichtbar).</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </body>
+        </html>
     """, mitarbeiter=MITARBEITER, demo_mode=DEMO_MODE)
 
 
@@ -237,7 +254,7 @@ def eingabe(datum):
             db.commit()
             session.pop("unlock_error", None)
 
-        # Wichtig: auf derselben Datum-Seite bleiben
+        # Auf derselben Datum-Seite bleiben
         return redirect(url_for("eingabe", datum=datum))
 
     # --- Speichern ---
@@ -257,6 +274,7 @@ def eingabe(datum):
         bier = int(request.form.get("bier", 0) or 0)
         alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
         hendl = int(request.form.get("hendl", 0) or 0)
+        # Steuer nur mittwochs (auch im Demo-Mode)
         steuer = float(request.form.get("steuer", 0) or 0) if wochentag == 2 else 0
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
 
@@ -317,16 +335,136 @@ def eingabe(datum):
     unlock_error = session.pop("unlock_error", "")
 
     return render_template_string("""
-        <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        input { padding: 5px; margin: 5px; }
-        .editable { background-color: orange; }
-        .readonly { background-color: #ddd; }
-        .calc-field { background-color: #eee; }
-        button { padding: 8px 12px; margin-top: 10px; }
-        a.nav-btn { padding: 8px 12px; margin: 5px; background-color: #ccc; text-decoration: none; border-radius: 5px; }
-        .error { color: #b00020; margin: 8px 0; }
-        </style>
+        <!doctype html>
+        <html lang="de">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+          <title>Eingabe</title>
+          <style>
+            .calc-field { background: #f1f3f5; }
+            .readonly   { background: #e9ecef; }
+            .editable   { background: #fff3cd; }
+          </style>
+        </head>
+        <body class="bg-light">
+        <div class="container py-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="mb-0">Eingabe für {{datum}} – {{name}}</h3>
+            <a href="{{ url_for('login') }}" class="btn btn-outline-secondary btn-sm">Start</a>
+          </div>
+
+          <div class="d-flex align-items-center gap-2 mb-3">
+            <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="btn btn-outline-primary">← Vortag</a>
+            <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="btn btn-outline-primary">Folgetag →</a>
+            <input type="date" id="datumsauswahl" class="form-control" style="max-width: 220px"
+                   value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
+            {% if wochentag == 2 %}
+            <span class="badge text-bg-info">Mittwoch (Steuer sichtbar)</span>
+            {% endif %}
+          </div>
+
+          {% if unlock_error %}
+            <div class="alert alert-danger">{{ unlock_error }}</div>
+          {% endif %}
+
+          <form method="post" oninput="berechne()" class="card shadow-sm">
+            <input type="hidden" name="action" value="save">
+            <div class="card-body">
+              <div class="row g-3">
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Summe Start</label>
+                  <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Bar (€)</label>
+                  <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}" min="0"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeicher t %}readonly{% endif %}>
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Bier (Anzahl)</label>
+                  <input type="number" id="bier" name="bier" value="{{bier}}" min="0"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Alkoholfrei (Anzahl)</label>
+                  <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}" min="0"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Hendl (Anzahl)</label>
+                  <input type="number" id="hendl" name="hendl" value="{{hendl}}" min="0"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
+                </div>
+
+                {% if wochentag == 2 %}
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Steuer (€)</label>
+                  <input type="number" step="0.01" id="steuer" name="steuer" value="{{steuer}}" min="0"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
+                </div>
+                {% endif %}
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Bar entnommen (€)</label>
+                  <input type="number" step="0.01" id="bar_entnommen" name="bar_entnommen" value="{{bar_entnommen}}" min="0"
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Gesamt (€)</label>
+                  <input type="number" step="0.01" id="gesamt" readonly class="form-control calc-field"
+                         value="{{ '%.2f' % gesamt }}">
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Tagessumme (€)</label>
+                  <input type="number" step="0.01" id="tagessumme" readonly class="form-control calc-field"
+                         value="{{ '%.2f' % tagessumme }}">
+                </div>
+              </div>
+
+              <div class="mt-4 d-flex gap-2">
+                {% if im_edit_zeitraum and not gespeichert %}
+                  <button type="submit" class="btn btn-success">Speichern</button>
+                {% else %}
+                  <div class="alert alert-secondary mb-0">Bearbeitung gesperrt. Zum Ändern bitte entsperren.</div>
+                {% endif %}
+                <a class="btn btn-outline-secondary" href="{{ url_for('login') }}">Zur Startseite</a>
+              </div>
+            </div>
+          </form>
+
+          {% if gespeichert %}
+          <div class="card shadow-sm mt-4">
+            <div class="card-body">
+              <h5 class="card-title">Eintrag bearbeiten (entsperren)</h5>
+              <form method="post" class="row g-2">
+                <input type="hidden" name="action" value="unlock">
+                <div class="col-12 col-md-6">
+                  <input type="password" name="edit_pw" class="form-control" placeholder="Passwort" autocomplete="current-password" required>
+                </div>
+                <div class="col-12 col-md-6">
+                  <button type="submit" class="btn btn-warning w-100">Editieren freischalten</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          {% endif %}
+        </div>
 
         <script>
         function berechne() {
@@ -334,97 +472,24 @@ def eingabe(datum):
             let preisAlk = {{preis_alk}};
             let preisHendl = {{preis_hendl}};
 
-            let bar = parseFloat(document.getElementById("bar").value) || 0;
-            let bier = parseInt(document.getElementById("bier").value) || 0;
-            let alkoholfrei = parseInt(document.getElementById("alkoholfrei").value) || 0;
-            let hendl = parseInt(document.getElementById("hendl").value) || 0;
+            let bar = parseFloat(document.getElementById("bar")?.value) || 0;
+            let bier = parseInt(document.getElementById("bier")?.value) || 0;
+            let alkoholfrei = parseInt(document.getElementById("alkoholfrei")?.value) || 0;
+            let hendl = parseInt(document.getElementById("hendl")?.value) || 0;
             let steuerEl = document.getElementById("steuer");
             let steuer = steuerEl ? (parseFloat(steuerEl.value) || 0) : 0;
-            let barEntnommen = parseFloat(document.getElementById("bar_entnommen").value) || 0;
+            let barEntnommen = parseFloat(document.getElementById("bar_entnommen")?.value) || 0;
 
             let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl) - steuer;
             let tagessumme = gesamt - barEntnommen;
 
-            document.getElementById("gesamt").value = gesamt.toFixed(2);
-            document.getElementById("tagessumme").value = tagessumme.toFixed(2);
+            if (document.getElementById("gesamt")) document.getElementById("gesamt").value = gesamt.toFixed(2);
+            if (document.getElementById("tagessumme")) document.getElementById("tagessumme").value = tagessumme.toFixed(2);
         }
         window.addEventListener('load', berechne);
         </script>
-
-        <h2>Eingabe für {{datum}} – {{name}}</h2>
-        <div>
-            <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="nav-btn">← Vortag</a>
-            <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="nav-btn">Folgetag →</a>
-            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
-        </div>
-
-        {% if unlock_error %}
-          <div class="error">{{ unlock_error }}</div>
-        {% endif %}
-
-        <form method="post" oninput="berechne()">
-            <input type="hidden" name="action" value="save">
-
-            Summe Start:
-            <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-
-            Bar (€):
-            <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-
-            Bier (Anzahl):
-            <input type="number" id="bier" name="bier" value="{{bier}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-
-            Alkoholfrei (Anzahl):
-            <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-
-            Hendl (Anzahl):
-            <input type="number" id="hendl" name="hendl" value="{{hendl}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-
-            {% if wochentag == 2 %}
-            Steuer (€):
-            <input type="number" step="0.01" id="steuer" name="steuer" value="{{steuer}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-            {% endif %}
-
-            Gesamt (€):
-            <input type="number" step="0.01" id="gesamt" readonly class="calc-field" value="{{ '%.2f' % gesamt }}"><br><br>
-
-            Bar entnommen (€):
-            <input type="number" step="0.01" id="bar_entnommen" name="bar_entnommen" value="{{bar_entnommen}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
-
-            Tagessumme (€):
-            <input type="number" step="0.01" id="tagessumme" readonly class="calc-field" value="{{ '%.2f' % tagessumme }}"><br><br>
-
-            {% if im_edit_zeitraum and not gespeichert %}
-              <button type="submit">Speichern</button>
-            {% else %}
-              <p><b>Bearbeitung gesperrt. Zum Ändern bitte entsperren.</b></p>
-            {% endif %}
-        </form>
-
-        {% if gespeichert %}
-          <hr>
-          <h3>Eintrag bearbeiten (entsperren)</h3>
-          <form method="post">
-            <input type="hidden" name="action" value="unlock">
-            <label>Passwort für {{name}}{% if admin %} / Admin{% endif %}:</label>
-            <input type="password" name="edit_pw" autocomplete="current-password" required>
-            <button type="submit">Editieren freischalten</button>
-          </form>
-        {% endif %}
+        </body>
+        </html>
     """,
         datum=datum,
         name=aktiver_user,
@@ -441,7 +506,7 @@ def eingabe(datum):
 
 
 # ------------------------------------------------------------------------------
-# Admin-Ansicht (mit Differenz zum Vortag) + Export
+# Admin-Ansicht (Differenz, Umsatz/Person, Steuer) + Export
 # ------------------------------------------------------------------------------
 @app.route("/admin")
 def admin_view():
@@ -449,8 +514,12 @@ def admin_view():
         return redirect(url_for("login"))
 
     db = get_db()
+    # Tagessumme (gesamt) UND Tagessumme Steuer
     rows = db.execute("""
-        SELECT datum, SUM(gesamt) AS tag_summe
+        SELECT
+          datum,
+          SUM(gesamt)      AS tag_summe,
+          SUM(steuer)      AS steuer_summe
         FROM eintraege
         WHERE gesamt IS NOT NULL
         GROUP BY datum
@@ -458,40 +527,94 @@ def admin_view():
         ORDER BY datum
     """).fetchall()
 
-    # Differenz zum Vortag berechnen
-    rows_with_diff = []
-    prev = None
+    # Mit Differenz und Umsatz/Person anreichern
+    rows_with = []
+    prev_sum = None
     for r in rows:
         s = float(r["tag_summe"] or 0)
-        diff = None if prev is None else (s - prev)
-        rows_with_diff.append({"datum": r["datum"], "tag_summe": s, "diff": diff})
-        prev = s
+        diff = None if prev_sum is None else (s - prev_sum)
+        pro_person = None if diff is None else (diff / 6.0)
+        rows_with.append({
+            "datum": r["datum"],
+            "tag_summe": s,
+            "diff": diff,
+            "pro_person": pro_person,
+            "steuer_summe": float(r["steuer_summe"] or 0)
+        })
+        prev_sum = s
 
-    gesamt_summe = sum(r["tag_summe"] for r in rows_with_diff)
+    # Gesamtrechnungen
+    gesamt_summe = sum(r["tag_summe"] for r in rows_with)
+    gesamt_diff = sum(r["diff"] for r in rows_with if r["diff"] is not None)
+    gesamt_pro_person = sum(r["pro_person"] for r in rows_with if r["pro_person"] is not None)
+    gesamt_steuer = sum(r["steuer_summe"] for r in rows_with)
 
     return render_template_string("""
-        <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        table { border-collapse: collapse; width: 70%; }
-        th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
-        th { background-color: #eee; }
-        </style>
-        <h2>Gesamtsummen pro Tag</h2>
-        <table>
-          <tr><th>Datum</th><th>Gesamtsumme (€)</th><th>Differenz zum Vortag (€)</th></tr>
-          {% for r in rows %}
-            <tr>
-              <td>{{ r.datum }}</td>
-              <td>{{ "%.2f"|format(r.tag_summe) }}</td>
-              <td>{% if r.diff is not none %}{{ "%.2f"|format(r.diff) }}{% else %}-{% endif %}</td>
-            </tr>
-          {% endfor %}
-        </table>
-        <h3>GESAMTSUMME ALLE TAGE: {{ "%.2f"|format(gesamt_summe) }}</h3>
-        <form action="{{ url_for('export_excel') }}" method="get" style="margin-top: 16px;">
-          <button type="submit">📥 Export als Excel</button>
-        </form>
-    """, rows=rows_with_diff, gesamt_summe=gesamt_summe)
+        <!doctype html>
+        <html lang="de">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+          <title>Admin</title>
+        </head>
+        <body class="bg-light">
+        <div class="container py-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="mb-0">Gesamtsummen pro Tag</h3>
+            <a href="{{ url_for('login') }}" class="btn btn-outline-secondary btn-sm">Abmelden</a>
+          </div>
+
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-bordered table-striped align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Datum</th>
+                      <th>Gesamtsumme (€)</th>
+                      <th>Differenz Vortag (€)</th>
+                      <th>Umsatz pro Person (€)</th>
+                      <th>Steuer je Tag (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for r in rows %}
+                      <tr>
+                        <td>{{ r.datum }}</td>
+                        <td>{{ "%.2f"|format(r.tag_summe) }}</td>
+                        <td>{% if r.diff is not none %}{{ "%.2f"|format(r.diff) }}{% else %}-{% endif %}</td>
+                        <td>{% if r.pro_person is not none %}{{ "%.2f"|format(r.pro_person) }}{% else %}-{% endif %}</td>
+                        <td>{{ "%.2f"|format(r.steuer_summe) }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                  <tfoot class="table-secondary">
+                    <tr>
+                      <th>GESAMT</th>
+                      <th>{{ "%.2f"|format(gesamt_summe) }}</th>
+                      <th>{{ "%.2f"|format(gesamt_diff) }}</th>
+                      <th>{{ "%.2f"|format(gesamt_pro_person) }}</th>
+                      <th>{{ "%.2f"|format(gesamt_steuer) }}</th>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <form action="{{ url_for('export_excel') }}" method="get" class="mt-3">
+                <button type="submit" class="btn btn-primary">📥 Export als Excel</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        </body>
+        </html>
+    """, rows=rows_with,
+       gesamt_summe=gesamt_summe,
+       gesamt_diff=gesamt_diff,
+       gesamt_pro_person=gesamt_pro_person,
+       gesamt_steuer=gesamt_steuer
+    )
 
 
 @app.route("/export_excel")
@@ -501,7 +624,10 @@ def export_excel():
 
     db = get_db()
     rows = db.execute("""
-        SELECT datum, SUM(gesamt) AS tag_summe
+        SELECT
+          datum,
+          SUM(gesamt) AS tag_summe,
+          SUM(steuer) AS steuer_summe
         FROM eintraege
         WHERE gesamt IS NOT NULL
         GROUP BY datum
@@ -510,21 +636,34 @@ def export_excel():
     """).fetchall()
 
     data = []
-    prev = None
+    prev_sum = None
     for r in rows:
         s = float(r["tag_summe"] or 0)
-        diff = None if prev is None else (s - prev)
-        data.append((r["datum"], s, diff))
-        prev = s
+        diff = None if prev_sum is None else (s - prev_sum)
+        pro_person = None if diff is None else (diff / 6.0)
+        steuer_summe = float(r["steuer_summe"] or 0)
+        data.append((r["datum"], s, diff, pro_person, steuer_summe))
+        prev_sum = s
+
+    gesamt_summe = sum(s for _, s, _, _, _ in data)
+    gesamt_diff = sum(d for _, _, d, _, _ in data if d is not None)
+    gesamt_pro_person = sum(p for _, _, _, p, _ in data if p is not None)
+    gesamt_steuer = sum(st for _, _, _, _, st in data)
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Gesamtsummen"
-    ws.append(["Datum", "Gesamtsumme (€)", "Differenz zum Vortag (€)"])
-    for d, s, diff in data:
-        ws.append([d, s, "" if diff is None else diff])
+    ws.append(["Datum", "Gesamtsumme (€)", "Differenz Vortag (€)", "Umsatz pro Person (€)", "Steuer je Tag (€)"])
+    for d, s, diff, pro_person, steuer_summe in data:
+        ws.append([
+            d,
+            s,
+            "" if diff is None else diff,
+            "" if pro_person is None else pro_person,
+            steuer_summe
+        ])
     ws.append([])
-    ws.append(["GESAMTSUMME ALLE TAGE", sum(s for _, s, _ in data)])
+    ws.append(["GESAMT", gesamt_summe, gesamt_diff, gesamt_pro_person, gesamt_steuer])
 
     output = BytesIO()
     wb.save(output)
