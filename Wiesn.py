@@ -43,8 +43,14 @@ MITARBEITER = [
     ).split(",") if m.strip()
 ]
 
+# Bearbeitbare Tage
 EDIT_START = _get_env_date("EDIT_START", "2025-09-20")
 EDIT_END   = _get_env_date("EDIT_END", "2025-10-05")
+
+# Zeitraum, in dem Bearbeitung erlaubt ist
+EDIT_BEARBEITBAR_START = _get_env_date("EDIT_BEARBEITBAR_START", "2025-09-18")
+EDIT_BEARBEITBAR_ENDE  = _get_env_date("EDIT_BEARBEITBAR_ENDE", "2025-10-07")
+
 
 # Passwörter aus ENV einlesen
 def _parse_password_map(default_names):
