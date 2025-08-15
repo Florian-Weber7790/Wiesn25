@@ -338,7 +338,7 @@ def eingabe(datum):
     # Optionale Fehlermeldung aus Unlock-Pfad
     fehler_msg = locals().get("fehler", "")
 
-    return render_template_string("""
+        return render_template_string("""
         <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
         input { padding: 5px; margin: 5px; }
@@ -347,7 +347,6 @@ def eingabe(datum):
         .calc-field { background-color: #eee; }
         button { padding: 8px 12px; margin-top: 10px; }
         a.nav-btn { padding: 8px 12px; margin: 5px; background-color: #ccc; text-decoration: none; border-radius: 5px; }
-        .error { color: #b00020; margin: 10px 0; }
         </style>
 
         <script>
@@ -355,112 +354,111 @@ def eingabe(datum):
             let preisBier = {{preis_bier}};
             let preisAlk = {{preis_alk}};
             let preisHendl = {{preis_hendl}};
+
             let bar = parseFloat(document.getElementById("bar").value) || 0;
             let bier = parseInt(document.getElementById("bier").value) || 0;
             let alkoholfrei = parseInt(document.getElementById("alkoholfrei").value) || 0;
             let hendl = parseInt(document.getElementById("hendl").value) || 0;
-            let steuerEl = document.getElementById("steuer");
-            let steuer = steuerEl ? (parseFloat(steuerEl.value) || 0) : 0;
+            let steuer = parseFloat(document.getElementById("steuer")?.value || 0);
             let barEntnommen = parseFloat(document.getElementById("bar_entnommen").value) || 0;
 
-            let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl) - steuer;
+            let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl) + steuer;
             let tagessumme = gesamt - barEntnommen;
 
             document.getElementById("gesamt").value = gesamt.toFixed(2);
             document.getElementById("tagessumme").value = tagessumme.toFixed(2);
         }
+        function springeZuDatum(){
+            let d = document.getElementById("datumsauswahl").value;
+            if(d){
+                window.location.href = "/eingabe/" + d;
+            }
+        }
         window.addEventListener('load', berechne);
         </script>
 
-        <h2>Eingabe für {{datum}} – {{name}}</h2>
+        <h2>Eingabe für {{datum}} - {{name}}</h2>
         <div>
             <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="nav-btn">← Vortag</a>
             <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="nav-btn">Folgetag →</a>
-            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
+            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="springeZuDatum()">
         </div>
 
-        {% if fehler_msg %}
-          <div class="error">{{ fehler_msg }}</div>
-        {% endif %}
-
-        <!-- Hauptformular: action=save -->
         <form method="post" oninput="berechne()">
-            <input type="hidden" name="action" value="save">
-
             Summe Start:
             <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
-                   class="{% if im_edit_zeitraum and datum == '2025-09-20' and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or datum != '2025-09-20' or gespeichert %}readonly{% endif %}><br><br>
+                   class="{% if bearbeitbar %}editable{% else %}readonly{% endif %}"
+                   {% if not bearbeitbar %}readonly{% endif %}><br><br>
 
             Bar (€):
             <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   class="{% if bearbeitbar %}editable{% else %}readonly{% endif %}"
+                   {% if not bearbeitbar %}readonly{% endif %}><br><br>
 
             Bier (Anzahl):
             <input type="number" id="bier" name="bier" value="{{bier}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   class="{% if bearbeitbar %}editable{% else %}readonly{% endif %}"
+                   {% if not bearbeitbar %}readonly{% endif %}><br><br>
 
             Alkoholfrei (Anzahl):
             <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   class="{% if bearbeitbar %}editable{% else %}readonly{% endif %}"
+                   {% if not bearbeitbar %}readonly{% endif %}><br><br>
 
             Hendl (Anzahl):
             <input type="number" id="hendl" name="hendl" value="{{hendl}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   class="{% if bearbeitbar %}editable{% else %}readonly{% endif %}"
+                   {% if not bearbeitbar %}readonly{% endif %}><br><br>
 
-            {% if is_wednesday %}
+            {% if wochentag == 2 %}
             Steuer (€):
             <input type="number" step="0.01" id="steuer" name="steuer" value="{{steuer}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   class="{% if bearbeitbar %}editable{% else %}readonly{% endif %}"
+                   {% if not bearbeitbar %}readonly{% endif %}><br><br>
             {% endif %}
 
             Gesamt (€):
-            <input type="number" step="0.01" id="gesamt" readonly class="calc-field" value="{{ '%.2f' % gesamt }}"><br><br>
+            <input type="number" step="0.01" id="gesamt" readonly class="calc-field"><br><br>
 
             Bar entnommen (€):
             <input type="number" step="0.01" id="bar_entnommen" name="bar_entnommen" value="{{bar_entnommen}}" min="0"
-                   class="{% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   class="editable"><br><br>
 
             Tagessumme (€):
-            <input type="number" step="0.01" id="tagessumme" readonly class="calc-field" value="{{ '%.2f' % tagessumme }}"><br><br>
+            <input type="number" step="0.01" id="tagessumme" readonly class="calc-field"><br><br>
 
-            {% if im_edit_zeitraum and not gespeichert %}
-              <button type="submit">Speichern</button>
+            {% if bearbeitbar %}
+            <button type="submit">Speichern</button>
             {% else %}
-              <p><b>Bearbeitung nur vom {{WIN_START}} bis {{WIN_END}} (für Daten {{DATA_START}}–{{DATA_END}}). Bereits gespeicherten Tag zum Editieren freischalten.</b></p>
+            <p><b>Bearbeitung gesperrt.</b></p>
+            <form method="post" action="{{ url_for('edit_unlock', datum=datum) }}">
+                <label>Passwort zum Entsperren:</label>
+                <input type="password" name="edit_pw">
+                <button type="submit">Editieren</button>
+            </form>
             {% endif %}
         </form>
-
-        <!-- Editieren-Formular: erscheint nur, wenn bereits gespeichert -->
-        {% if gespeichert %}
-          <hr>
-          <h3>Eintrag bearbeiten</h3>
-          <form method="post">
-            <input type="hidden" name="action" value="unlock">
-            <label>Passwort für {{name}}{% if admin %} / Admin{% endif %}:</label>
-            <input type="password" name="edit_pw" autocomplete="current-password" required>
-            <button type="submit">Editieren freischalten</button>
-          </form>
-        {% endif %}
     """,
-       datum=datum,
-       name=aktiver_user,
-       admin=session.get("admin", False),
-       summe_start=summe_start, bar=bar, bier=bier,
-       alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer,
-       bar_entnommen=bar_entnommen, gesamt=gesamt, tagessumme=tagessumme,
-       gespeichert=gespeichert,
-       preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
-       vortag_link=vortag_link, folgetag_link=folgetag_link,
-       im_edit_zeitraum=im_edit_zeitraum, is_wednesday=is_wednesday,
-       WIN_START=WIN_START.isoformat(), WIN_END=WIN_END.isoformat(),
-       DATA_START=DATA_START.isoformat(),
+    datum=datum,
+    name=session["name"],
+    summe_start=summe_start,
+    bar=bar,
+    bier=bier,
+    alkoholfrei=alkoholfrei,
+    hendl=hendl,
+    steuer=row["steuer"] if row and "steuer" in row.keys() else 0,
+    bar_entnommen=bar_entnommen,
+    gespeichert=gespeichert,
+    preis_bier=PREIS_BIER,
+    preis_alk=PREIS_ALKOHOLFREI,
+    preis_hendl=PREIS_HENDL,
+    vortag_link=vortag_link,
+    folgetag_link=folgetag_link,
+    bearbeitbar=im_edit_zeitraum and (not gespeichert or session.get("edit_unlocked", False)),
+    edit_start=EDIT_START.isoformat(),
+    edit_end=EDIT_END.isoformat(),
+    wochentag=datum_obj.weekday()
+)
 
 
 # ------------------------------------------------------------------------------
