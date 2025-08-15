@@ -384,7 +384,7 @@ def eingabe(datum):
                   <label class="form-label">Bar (€)</label>
                   <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}" min="0"
                          class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
-                         {% if not im_edit_zeitraum or gespeicher t %}readonly{% endif %}>
+                         {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
                 </div>
 
                 <div class="col-12 col-md-4">
