@@ -167,12 +167,11 @@ def eingabe(datum):
 
     datum_obj = date.fromisoformat(datum)
 
-    # Prüfen, ob Datum erlaubt (DATA_START / DATA_END musst du oben definieren)
-    if not (DATA_START <= datum_obj <= DATA_END):
-        return "<h3>Datum außerhalb des erlaubten Zeitraums!</h3>", 403
-
-    # Bearbeitung nur zwischen EDIT_START und EDIT_END möglich
-    im_edit_zeitraum = EDIT_START <= date.today() <= EDIT_END
+    # Prüfen, ob Speichern erlaubt ist
+    bearbeitung_erlaubt = (
+        EDIT_START <= date.today() <= EDIT_END
+        and DATA_START <= datum_obj <= DATA_END
+    )
 
     db = get_db()
     row = db.execute(
@@ -180,7 +179,7 @@ def eingabe(datum):
         (datum, session["name"])
     ).fetchone()
 
-    if request.method == "POST" and im_edit_zeitraum and (not row or row["gespeichert"] == 0):
+    if request.method == "POST" and bearbeitung_erlaubt and (not row or row["gespeichert"] == 0):
         if datum_obj == DATA_START:
             summe_start = float(request.form.get("summe_start", 0) or 0)
         else:
@@ -247,40 +246,38 @@ def eingabe(datum):
     wochentag = datum_obj.strftime("%A")
 
     return render_template_string("""
-        <!-- Styling weglassen für Kürze -->
         <h2>Eingabe für {{datum}} - {{name}}</h2>
         <div>
             <a href="{{ url_for('eingabe', datum=vortag_link) }}">← Vortag</a>
             <a href="{{ url_for('eingabe', datum=folgetag_link) }}">Folgetag →</a>
-            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="springeZuDatum()"
-                   min="{{data_start}}" max="{{data_end}}">
+            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="springeZuDatum()">
         </div>
 
         <form method="post" oninput="berechne()">
             Summe Start:
             <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
-                   {% if not im_edit_zeitraum or datum != data_start or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or datum != data_start or gespeichert %}readonly{% endif %}><br><br>
 
             Bar (€):
             <input type="number" step="0.01" id="bar" name="bar" value="{{bar}}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Bier (Anzahl):
             <input type="number" id="bier" name="bier" value="{{bier}}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Alkoholfrei (Anzahl):
             <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Hendl (Anzahl):
             <input type="number" id="hendl" name="hendl" value="{{hendl}}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             {% if wochentag == "Wednesday" %}
             Steuer (€):
             <input type="number" step="0.01" name="steuer" value="{{steuer}}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
             {% endif %}
 
             Gesamt (€):
@@ -288,21 +285,21 @@ def eingabe(datum):
 
             Bar entnommen (€):
             <input type="number" step="0.01" id="bar_entnommen" name="bar_entnommen" value="{{bar_entnommen}}"
-                   {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}><br><br>
+                   {% if not bearbeitung_erlaubt or gespeichert %}readonly{% endif %}><br><br>
 
             Tagessumme (€):
             <input type="number" step="0.01" id="tagessumme" readonly><br><br>
 
-            {% if im_edit_zeitraum and not gespeichert %}
+            {% if bearbeitung_erlaubt and not gespeichert %}
             <button type="submit">Speichern</button>
             {% else %}
-            <p><b>Bearbeitung nur vom {{edit_start}} bis {{edit_end}} möglich.</b></p>
+            <p><b>Bearbeitung nur vom {{edit_start}} bis {{edit_end}} und für Daten vom {{data_start}} bis {{data_end}} möglich.</b></p>
             {% endif %}
         </form>
     """, datum=datum, name=session["name"], summe_start=summe_start, bar=bar, bier=bier,
        alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer, bar_entnommen=bar_entnommen,
        gespeichert=gespeichert, vortag_link=vortag_link, folgetag_link=folgetag_link,
-       im_edit_zeitraum=im_edit_zeitraum, data_start=DATA_START.isoformat(),
+       bearbeitung_erlaubt=bearbeitung_erlaubt, data_start=DATA_START.isoformat(),
        data_end=DATA_END.isoformat(), edit_start=EDIT_START.isoformat(), edit_end=EDIT_END.isoformat(),
        wochentag=wochentag)
 
