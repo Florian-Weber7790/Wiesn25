@@ -64,9 +64,9 @@ MITARBEITER = [
 MITARBEITER_PASSWOERTER = _parse_password_map(MITARBEITER)
 
 # Produktiv-Zeiträume
-DATA_START = _get_env_date("DATA_START", "2025-09-20")        # Tage, die bearbeitet werden dürfen
+DATA_START = _get_env_date("DATA_START", "2025-09-20")               # Tage, die bearbeitet werden dürfen
 DATA_END   = _get_env_date("DATA_END",   "2025-10-05")
-EDIT_WINDOW_START = _get_env_date("EDIT_WINDOW_START", "2025-09-18")  # Zeitraum, in dem Bearbeitung grundsätzlich erlaubt ist
+EDIT_WINDOW_START = _get_env_date("EDIT_WINDOW_START", "2025-09-18") # Zeitraum, in dem Bearbeitung grundsätzlich erlaubt ist
 EDIT_WINDOW_END   = _get_env_date("EDIT_WINDOW_END",   "2025-10-07")
 
 # Demo-Modus: erlaubt alles jederzeit
@@ -236,6 +236,8 @@ def eingabe(datum):
             db.execute("UPDATE eintraege SET gespeichert=0 WHERE id=?", (row["id"],))
             db.commit()
             session.pop("unlock_error", None)
+
+        # Wichtig: auf derselben Datum-Seite bleiben
         return redirect(url_for("eingabe", datum=datum))
 
     # --- Speichern ---
@@ -406,7 +408,7 @@ def eingabe(datum):
             Tagessumme (€):
             <input type="number" step="0.01" id="tagessumme" readonly class="calc-field" value="{{ '%.2f' % tagessumme }}"><br><br>
 
-                        {% if im_edit_zeitraum and not gespeichert %}
+            {% if im_edit_zeitraum and not gespeichert %}
               <button type="submit">Speichern</button>
             {% else %}
               <p><b>Bearbeitung gesperrt. Zum Ändern bitte entsperren.</b></p>
