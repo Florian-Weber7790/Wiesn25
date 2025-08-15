@@ -43,7 +43,7 @@ MITARBEITER = [
 ]
 
 EDIT_START = _get_env_date("EDIT_START", "2025-09-20")
-EDIT_END   = _get_env_date("EDIT_END", "2025-10-05")
+EDIT_END   = _get_env_date("EDIT_END", "2025-10-06")
 
 # ------------------------------------------------------------------------------
 # App
