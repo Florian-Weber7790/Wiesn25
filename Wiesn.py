@@ -10,7 +10,6 @@ from flask import (
 )
 import openpyxl
 
-
 # ------------------------------------------------------------------------------
 # ENV-Helper
 # ------------------------------------------------------------------------------
@@ -273,11 +272,12 @@ def eingabe(datum):
         bier = int(request.form.get("bier", 0) or 0)
         alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
         hendl = int(request.form.get("hendl", 0) or 0)
-        # Steuer nur mittwochs (auch im Demo-Mode)
-        steuer = float(request.form.get("steuer", 0) or 0) if wochentag == 2 else 0
+        # Steuer nur mittwochs eingeben/speichern, aber NICHT in Tagesberechnung abziehen
+        steuer = float(request.form.get("steuer", 0) or 0) if wochentag == 2 else 0.0
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
 
-        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL) - steuer
+        # Tagesberechnung OHNE Steuerabzug
+        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL)
         tagessumme = gesamt - bar_entnommen
 
         if row:
@@ -325,7 +325,7 @@ def eingabe(datum):
             ).fetchone()
             summe_start = float(vortag_row["tagessumme"] if vortag_row else 0)
         bar = bier = alkoholfrei = hendl = steuer = bar_entnommen = 0
-        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL) - steuer
+        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL)
         tagessumme = gesamt - bar_entnommen
         gespeichert = 0
 
@@ -355,12 +355,12 @@ def eingabe(datum):
           </div>
 
           <div class="d-flex align-items-center gap-2 mb-3">
-            <a href="{{ url_for('eingabe', datum=( (datum|tojson|safe)[:10] if False else '') or vortag_link) }}" class="btn btn-outline-primary">← Vortag</a>
+            <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="btn btn-outline-primary">← Vortag</a>
             <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="btn btn-outline-primary">Folgetag →</a>
             <input type="date" id="datumsauswahl" class="form-control" style="max-width: 220px"
                    value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
             {% if wochentag == 2 %}
-            <span class="badge text-bg-info">Mittwoch (Steuer sichtbar)</span>
+            <span class="badge text-bg-info">Mittwoch (Steuerfeld sichtbar)</span>
             {% endif %}
           </div>
 
@@ -475,11 +475,10 @@ def eingabe(datum):
             let bier = parseInt(document.getElementById("bier")?.value) || 0;
             let alkoholfrei = parseInt(document.getElementById("alkoholfrei")?.value) || 0;
             let hendl = parseInt(document.getElementById("hendl")?.value) || 0;
-            let steuerEl = document.getElementById("steuer");
-            let steuer = steuerEl ? (parseFloat(steuerEl.value) || 0) : 0;
             let barEntnommen = parseFloat(document.getElementById("bar_entnommen")?.value) || 0;
 
-            let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl) - steuer;
+            // Steuer NICHT abziehen – Tagesanzeige bleibt brutto
+            let gesamt = bar + (bier * preisBier) + (alkoholfrei * preisAlk) + (hendl * preisHendl);
             let tagessumme = gesamt - barEntnommen;
 
             if (document.getElementById("gesamt")) document.getElementById("gesamt").value = gesamt.toFixed(2);
@@ -493,20 +492,19 @@ def eingabe(datum):
         datum=datum,
         name=aktiver_user,
         ist_erster_tag=ist_erster_tag,
-        summe_start=summe_start, bar=bar, bier=bier,
-        alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer,
-        bar_entnommen=bar_entnommen, gesamt=gesamt, tagessumme=tagessumme,
+        wochentag=wochentag,
+        summe_start=summe_start, bar=bar, bier=bier, alkoholfrei=alkoholfrei,
+        hendl=hendl, steuer=steuer, bar_entnommen=bar_entnommen,
+        gesamt=gesamt, tagessumme=tagessumme,
         gespeichert=gespeichert,
         preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
-        vortag_link=(datum_obj - timedelta(days=1)).isoformat(),
-        folgetag_link=(datum_obj + timedelta(days=1)).isoformat(),
-        im_edit_zeitraum=im_edit_zeitraum,
-        wochentag=wochentag
+        vortag_link=vortag_link, folgetag_link=folgetag_link,
+        im_edit_zeitraum=im_edit_zeitraum
     )
 
 
 # ------------------------------------------------------------------------------
-# Admin (kurz gehalten; kann bei Bedarf wieder mit Tabelle & Export erweitert werden)
+# Admin-Ansicht (tägliche Brutto-Summen; Steuer nur am Ende einmal abgezogen)
 # ------------------------------------------------------------------------------
 @app.route("/admin")
 def admin_view():
@@ -515,55 +513,110 @@ def admin_view():
 
     db = get_db()
     rows = db.execute("""
-        SELECT datum, SUM(gesamt) AS tag_summe, SUM(steuer) AS steuer_summe
+        SELECT
+          datum,
+          SUM(gesamt) AS tag_summe,
+          SUM(steuer) AS steuer_summe
         FROM eintraege
+        WHERE gesamt IS NOT NULL
         GROUP BY datum
+        HAVING SUM(gesamt) > 0
         ORDER BY datum
     """).fetchall()
 
-    # einfache Bootstrap-Ausgabe
+    # Anzeige: tägliche Brutto-Summen (ohne Steuerabzug)
+    rows_with = []
+    prev_sum = None
+    for r in rows:
+        brutto = float(r["tag_summe"] or 0)
+        diff = None if prev_sum is None else (brutto - prev_sum)
+        pro_person = None if diff is None else (diff / 6.0)
+        rows_with.append({
+            "datum": r["datum"],
+            "tag_summe": brutto,
+            "steuer_summe": float(r["steuer_summe"] or 0),
+            "diff": diff,
+            "pro_person": pro_person
+        })
+        prev_sum = brutto
+
+    gesamt_brutto = sum(r["tag_summe"] for r in rows_with)
+    gesamt_steuer = sum(r["steuer_summe"] for r in rows_with)
+    gesamt_nach_steuer = gesamt_brutto - gesamt_steuer
+
     return render_template_string("""
-    <!doctype html>
-    <html lang="de">
-    <head>
-      <meta charset="utf-8">
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-      <title>Admin</title>
-    </head>
-    <body class="bg-light">
-      <div class="container py-4">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h3 class="mb-0">Admin – Tagesübersicht</h3>
-          <a href="{{ url_for('login') }}" class="btn btn-outline-secondary btn-sm">Abmelden</a>
-        </div>
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <table class="table table-striped table-bordered">
-              <thead class="table-light">
-                <tr><th>Datum</th><th>Gesamtsumme (€)</th><th>Steuer je Tag (€)</th></tr>
-              </thead>
-              <tbody>
-                {% for r in rows %}
-                  <tr>
-                    <td>{{ r["datum"] }}</td>
-                    <td>{{ "%.2f"|format(r["tag_summe"] or 0) }}</td>
-                    <td>{{ "%.2f"|format(r["steuer_summe"] or 0) }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            <form class="mt-2" action="{{ url_for('export_excel') }}" method="get">
-              <button class="btn btn-primary">📥 Export als Excel</button>
-            </form>
+        <!doctype html>
+        <html lang="de">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+          <title>Admin</title>
+        </head>
+        <body class="bg-light">
+        <div class="container py-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="mb-0">Gesamtsummen pro Tag</h3>
+            <a href="{{ url_for('login') }}" class="btn btn-outline-secondary btn-sm">Abmelden</a>
+          </div>
+
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-bordered table-striped align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Datum</th>
+                      <th>Gesamtsumme brutto (€)</th>
+                      <th>Differenz Vortag (€)</th>
+                      <th>Umsatz pro Person (€)</th>
+                      <th>Steuer je Tag (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for r in rows %}
+                      <tr>
+                        <td>{{ r.datum }}</td>
+                        <td>{{ "%.2f"|format(r.tag_summe) }}</td>
+                        <td>{% if r.diff is not none %}{{ "%.2f"|format(r.diff) }}{% else %}-{% endif %}</td>
+                        <td>{% if r.pro_person is not none %}{{ "%.2f"|format(r.pro_person) }}{% else %}-{% endif %}</td>
+                        <td>{{ "%.2f"|format(r.steuer_summe) }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                  <tfoot class="table-secondary">
+                    <tr>
+                      <th>GESAMT BRUTTO</th>
+                      <th>{{ "%.2f"|format(gesamt_brutto) }}</th>
+                      <th colspan="2"></th>
+                      <th>{{ "%.2f"|format(gesamt_steuer) }}</th>
+                    </tr>
+                    <tr class="table-dark">
+                      <th>GESAMT NACH STEUER</th>
+                      <th>{{ "%.2f"|format(gesamt_nach_steuer) }}</th>
+                      <th colspan="3"></th>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <form action="{{ url_for('export_excel') }}" method="get" class="mt-3">
+                <button type="submit" class="btn btn-primary">📥 Export als Excel</button>
+              </form>
+            </div>
           </div>
         </div>
-      </div>
-    </body>
-    </html>
-    """, rows=rows)
+        </body>
+        </html>
+    """, rows=rows_with,
+       gesamt_brutto=gesamt_brutto,
+       gesamt_steuer=gesamt_steuer,
+       gesamt_nach_steuer=gesamt_nach_steuer
+    )
+
 
 # ------------------------------------------------------------------------------
-# Excel-Export (Datum & Steuer mitnehmen)
+# Excel-Export (brutto je Tag, Steuer je Tag; am Ende einmal abziehen)
 # ------------------------------------------------------------------------------
 @app.route("/export_excel")
 def export_excel():
@@ -572,31 +625,35 @@ def export_excel():
 
     db = get_db()
     rows = db.execute("""
-        SELECT datum, SUM(gesamt) AS tag_summe, SUM(steuer) AS steuer_summe
+        SELECT
+          datum,
+          SUM(gesamt) AS tag_summe,
+          SUM(steuer) AS steuer_summe
         FROM eintraege
+        WHERE gesamt IS NOT NULL
         GROUP BY datum
+        HAVING SUM(gesamt) > 0
         ORDER BY datum
     """).fetchall()
 
     data = []
     prev_sum = None
     for r in rows:
-        s = float(r["tag_summe"] or 0)
-        diff = None if prev_sum is None else (s - prev_sum)
-        pro_person = None if diff is None else (diff / 6.0)
+        brutto = float(r["tag_summe"] or 0)
         steuer_summe = float(r["steuer_summe"] or 0)
-        data.append((r["datum"], s, diff, pro_person, steuer_summe))
-        prev_sum = s
+        diff = None if prev_sum is None else (brutto - prev_sum)
+        pro_person = None if diff is None else (diff / 6.0)
+        data.append((r["datum"], brutto, diff, pro_person, steuer_summe))
+        prev_sum = brutto
 
-    gesamt_summe = sum(s for _, s, _, _, _ in data)
-    gesamt_diff = sum(d for _, _, d, _, _ in data if d is not None)
-    gesamt_pro_person = sum(p for _, _, _, p, _ in data if p is not None)
+    gesamt_brutto = sum(s for _, s, _, _, _ in data)
     gesamt_steuer = sum(st for _, _, _, _, st in data)
+    gesamt_nach_steuer = gesamt_brutto - gesamt_steuer
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Gesamtsummen"
-    ws.append(["Datum", "Gesamtsumme (€)", "Differenz Vortag (€)", "Umsatz pro Person (€)", "Steuer je Tag (€)"])
+    ws.append(["Datum", "Gesamtsumme brutto (€)", "Differenz Vortag (€)", "Umsatz pro Person (€)", "Steuer je Tag (€)"])
     for d, s, diff, pro_person, steuer_summe in data:
         ws.append([
             d,
@@ -606,11 +663,13 @@ def export_excel():
             steuer_summe
         ])
     ws.append([])
-    ws.append(["GESAMT", gesamt_summe, gesamt_diff, gesamt_pro_person, gesamt_steuer])
+    ws.append(["GESAMT BRUTTO", gesamt_brutto, "", "", gesamt_steuer])
+    ws.append(["GESAMT NACH STEUER", gesamt_nach_steuer])
 
     output = BytesIO()
     wb.save(output)
     output.seek(0)
+
     filename = f"Wiesn25_Gesamt_{date.today().isoformat()}.xlsx"
     return send_file(
         output,
