@@ -176,12 +176,11 @@ def eingabe(datum):
 
     datum_obj = date.fromisoformat(datum)
 
-    # Bearbeitungsfenster (immer zugänglich, aber nur in diesem Zeitraum editierbar)
-    im_edit_zeitraum = EDIT_START <= date.today() <= EDIT_END
-
-    # Erlaubte Datumsauswahl
-    if not (DATA_START <= datum_obj <= DATA_END):
-        return f"<h3>Datum {datum} außerhalb des erlaubten Zeitraums!</h3>", 403
+    # Bearbeitungslogik: heute im Bearbeitungszeitraum UND ausgewählter Tag im erlaubten Datumsbereich
+    heute = date.today()
+    im_bearbeitungszeitraum = EDIT_START <= heute <= EDIT_END
+    tag_im_erlaubten_bereich = DATA_START <= datum_obj <= DATA_END
+    im_edit_zeitraum = im_bearbeitungszeitraum and tag_im_erlaubten_bereich
 
     db = get_db()
     row = db.execute(
@@ -189,7 +188,6 @@ def eingabe(datum):
         (datum, session["name"])
     ).fetchone()
 
-    # POST-Handling
     if request.method == "POST" and im_edit_zeitraum and (not row or row["gespeichert"] == 0):
         if datum_obj == DATA_START:
             summe_start = float(request.form.get("summe_start", 0) or 0)
@@ -225,12 +223,11 @@ def eingabe(datum):
                 (datum, mitarbeiter, summe_start, bar, bier, alkoholfrei, hendl, steuer,
                  gesamt, bar_entnommen, tagessumme, gespeichert)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
-            """, (datum, session["name"], summe_start, bar, bier, alkoholfrei, hendl, steuer,
-                  gesamt, bar_entnommen, tagessumme))
+            """, (datum, session["name"], summe_start, bar, bier, alkoholfrei,
+                  hendl, steuer, gesamt, bar_entnommen, tagessumme))
         db.commit()
         return redirect(url_for("eingabe", datum=datum))
 
-    # GET-Daten vorbereiten
     gespeichert = row["gespeichert"] if row else 0
     if row:
         summe_start = row["summe_start"]
@@ -254,6 +251,7 @@ def eingabe(datum):
 
     vortag_link = (datum_obj - timedelta(days=1)).isoformat()
     folgetag_link = (datum_obj + timedelta(days=1)).isoformat()
+
     is_wednesday = datum_obj.weekday() == 2  # Mittwoch
 
     return render_template_string("""
@@ -299,7 +297,7 @@ def eingabe(datum):
         <div>
             <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="nav-btn">← Vortag</a>
             <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="nav-btn">Folgetag →</a>
-            <input type="date" id="datumsauswahl" min="{{data_start}}" max="{{data_end}}" value="{{datum}}" onchange="springeZuDatum()">
+            <input type="date" id="datumsauswahl" value="{{datum}}" onchange="springeZuDatum()">
         </div>
 
         <form method="post" oninput="berechne()">
@@ -349,16 +347,18 @@ def eingabe(datum):
             {% if im_edit_zeitraum and not gespeichert %}
             <button type="submit">Speichern</button>
             {% else %}
-            <p><b>Bearbeitung nur vom {{edit_start}} bis {{edit_end}} möglich.</b></p>
+            <p><b>Bearbeitung nur vom {{edit_start}} bis {{edit_end}} und nur für {{data_start}} bis {{data_end}} möglich.</b></p>
             {% endif %}
         </form>
     """, datum=datum, name=session["name"], summe_start=summe_start, bar=bar, bier=bier,
        alkoholfrei=alkoholfrei, hendl=hendl, steuer=steuer, bar_entnommen=bar_entnommen,
-       gespeichert=gespeichert, preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI,
-       preis_hendl=PREIS_HENDL, vortag_link=vortag_link, folgetag_link=folgetag_link,
-       im_edit_zeitraum=im_edit_zeitraum, edit_start=EDIT_START.isoformat(),
-       edit_end=EDIT_END.isoformat(), data_start=DATA_START.isoformat(), data_end=DATA_END.isoformat(),
-       is_wednesday=is_wednesday)
+       gespeichert=gespeichert,
+       preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
+       vortag_link=vortag_link, folgetag_link=folgetag_link,
+       im_edit_zeitraum=im_edit_zeitraum,
+       is_wednesday=is_wednesday,
+       data_start=DATA_START.isoformat(), data_end=DATA_END.isoformat(),
+       edit_start=EDIT_START.isoformat(), edit_end=EDIT_END.isoformat())
 
 # ------------------------------------------------------------------------------
 # Admin-Ansicht mit Differenz
