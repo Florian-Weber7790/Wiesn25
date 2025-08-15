@@ -374,6 +374,7 @@ def admin_view():
         </form>
     """, rows=rows, gesamt_summe=gesamt_summe)
 
+
 # ------------------------------------------------------------------------------
 # Excel-Export
 # ------------------------------------------------------------------------------
@@ -404,12 +405,18 @@ def export_excel():
     output = BytesIO()
     wb.save(output)
     output.seek(0)
+
+    # Dateiname mit heutigem Tagesdatum (YYYY-MM-DD)
+    today_str = date.today().isoformat()               # z.B. 2025-08-15
+    filename = f"Wiesn25_Gesamt_{today_str}.xlsx"
+
     return send_file(
         output,
         as_attachment=True,
-        download_name="Gesamtsummen.xlsx",
+        download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
 # ------------------------------------------------------------------------------
 # Lokaler Start
