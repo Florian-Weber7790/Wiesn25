@@ -42,8 +42,13 @@ MITARBEITER = [
     ).split(",") if m.strip()
 ]
 
-EDIT_START = _get_env_date("EDIT_START", "2025-09-20")
-EDIT_END   = _get_env_date("EDIT_END", "2025-10-06")
+# Zeitraum für Daten, die erfasst werden dürfen
+DATA_START = _get_env_date("DATA_START", "2025-09-20")
+DATA_END   = _get_env_date("DATA_END", "2025-10-05")
+
+# Zeitraum, in dem das Formular bearbeitet werden darf
+EDIT_START = _get_env_date("EDIT_START", "2025-09-18")
+EDIT_END   = _get_env_date("EDIT_END", "2025-10-07")
 
 # ------------------------------------------------------------------------------
 # App
@@ -159,8 +164,14 @@ def eingabe(datum):
     if "name" not in session:
         return redirect(url_for("login"))
 
-    datum_obj = date.fromisoformat(datum)
-    im_edit_zeitraum = EDIT_START <= datum_obj <= EDIT_END
+datum_obj = date.fromisoformat(datum)
+
+# Prüfen, ob das gewählte Datum im erlaubten Datenbereich liegt
+if not (DATA_START <= datum_obj <= DATA_END):
+    return "<h3>Datum außerhalb des erlaubten Zeitraums!</h3>", 403
+
+# Bearbeitungsfenster: Nur im Edit-Zeitraum ist Speichern erlaubt
+im_edit_zeitraum = EDIT_START <= date.today() <= EDIT_END
 
     db = get_db()
     row = db.execute(
