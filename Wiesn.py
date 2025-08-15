@@ -152,46 +152,67 @@ def healthz():
 # ------------------------------------------------------------------------------
 # Login
 # ------------------------------------------------------------------------------
-@app.route("/", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        name = request.form.get("name")
-        admin_pw = request.form.get("admin_pw")
+@app.route("/eingabe/<datum>", methods=["GET", "POST"])
+def eingabe(datum):
+    if "name" not in session:
+        return redirect(url_for("login"))
 
-        if admin_pw == ADMIN_PASSWORT:
-            session["admin"] = True
-            return redirect(url_for("admin_view"))
+    datum_obj = date.fromisoformat(datum)
 
-        if name in MITARBEITER:
-            session["name"] = name
-            session["admin"] = False
-            return redirect(url_for("eingabe", datum=str(date.today())))
+    # Standard-Zeitprüfungen
+    im_edit_zeitraum = EDIT_BEARBEITBAR_START <= datum_obj <= EDIT_BEARBEITBAR_ENDE
+    im_erlaubten_tag = EDIT_START <= datum_obj <= EDIT_END
 
-    return render_template_string("""
-        <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        select, input { padding: 5px; margin: 5px; }
-        button { padding: 8px 12px; }
-        </style>
-        <h2>Login</h2>
-        <form method="post">
-            <label>Mitarbeiter:</label>
-            <select name="name">
-                <option value="">-- auswählen --</option>
-                {% for m in mitarbeiter %}
-                <option value="{{m}}">{{m}}</option>
-                {% endfor %}
-            </select>
-            <br><br>
-            <label>Oder Admin Passwort:</label>
-            <input type="password" name="admin_pw" autocomplete="current-password">
-            <br><br>
-            <button type="submit">Login</button>
-        </form>
-        {% if demo_mode %}
-          <p style="margin-top:1rem;color:#555;">Demo-Modus aktiv: Datenbereich = heute±5 Tage, Bearbeitung = heute±2 Tage.</p>
-        {% endif %}
-    """, mitarbeiter=MITARBEITER, demo_mode=DEMO_MODE)
+    # Demo-Mode überschreibt alles → immer bearbeitbar
+    if DEMO_MODE:
+        im_edit_zeitraum = True
+        im_erlaubten_tag = True
+
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM eintraege WHERE datum=? AND mitarbeiter=?",
+        (datum, session["name"])
+    ).fetchone()
+
+    if request.method == "POST" and im_edit_zeitraum and im_erlaubten_tag and (not row or row["gespeichert"] == 0):
+        if datum_obj == EDIT_START:
+            summe_start = float(request.form.get("summe_start", 0) or 0)
+        else:
+            vortag = datum_obj - timedelta(days=1)
+            vortag_row = db.execute(
+                "SELECT tagessumme FROM eintraege WHERE datum=? AND mitarbeiter=?",
+                (vortag.isoformat(), session["name"])
+            ).fetchone()
+            summe_start = float(vortag_row["tagessumme"] if vortag_row else 0)
+
+        bar = float(request.form.get("bar", 0) or 0)
+        bier = int(request.form.get("bier", 0) or 0)
+        alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
+        hendl = int(request.form.get("hendl", 0) or 0)
+        steuer = float(request.form.get("steuer", 0) or 0)
+        bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
+
+        gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL) - steuer
+        tagessumme = gesamt - bar_entnommen
+
+        if row:
+            db.execute("""
+                UPDATE eintraege
+                SET summe_start=?, bar=?, bier=?, alkoholfrei=?, hendl=?, steuer=?,
+                    gesamt=?, bar_entnommen=?, tagessumme=?, gespeichert=1
+                WHERE id=?
+            """, (summe_start, bar, bier, alkoholfrei, hendl, steuer,
+                  gesamt, bar_entnommen, tagessumme, row["id"]))
+        else:
+            db.execute("""
+                INSERT INTO eintraege
+                (datum, mitarbeiter, summe_start, bar, bier, alkoholfrei, hendl, steuer,
+                 gesamt, bar_entnommen, tagessumme, gespeichert)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+            """, (datum, session["name"], summe_start, bar, bier, alkoholfrei,
+                  hendl, steuer, gesamt, bar_entnommen, tagessumme))
+        db.commit()
+        return redirect(url_for("eingabe", datum=datum))
 
 # ------------------------------------------------------------------------------
 # Eingabe
