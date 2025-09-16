@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import shutil
+import time
 from pathlib import Path
 from datetime import date, timedelta, datetime
 from io import BytesIO
@@ -10,11 +12,13 @@ from flask import (
 )
 import openpyxl
 
+
 # ------------------------------------------------------------------------------
 # ENV-Helper
 # ------------------------------------------------------------------------------
 def _get_env(key, default=None):
     return os.getenv(key, default)
+
 
 def _get_env_float(key, default):
     try:
@@ -22,9 +26,11 @@ def _get_env_float(key, default):
     except Exception:
         return default
 
+
 def _get_env_date(key, default_iso):
     raw = os.getenv(key, default_iso)
     return date.fromisoformat(raw)
+
 
 def _parse_password_map(default_names):
     """
@@ -62,13 +68,11 @@ MITARBEITER = [
 ]
 MITARBEITER_PASSWOERTER = _parse_password_map(MITARBEITER)
 
-# Produktiv-Zeiträume (werden im Demo-Mode ignoriert)
-DATA_START = _get_env_date("DATA_START", "2025-09-20")               # Tage, die bearbeitet werden dürfen
+# Tage, die eingegeben werden dürfen (Steuerfeld nur mittwochs sichtbar)
+DATA_START = _get_env_date("DATA_START", "2025-09-20")
 DATA_END   = _get_env_date("DATA_END",   "2025-10-05")
-EDIT_WINDOW_START = _get_env_date("EDIT_WINDOW_START", "2025-09-18") # Zeitraum, in dem Bearbeitung grundsätzlich erlaubt ist
-EDIT_WINDOW_END   = _get_env_date("EDIT_WINDOW_END",   "2025-10-07")
 
-# Demo-Modus: erlaubt immer Bearbeitung (Steuerfeld bleibt nur mittwochs sichtbar)
+# Demo-Modus: erlaubt Bearbeitung jederzeit (Steuerfeld bleibt nur mittwochs sichtbar)
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 
@@ -77,6 +81,7 @@ DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 # ------------------------------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB Upload-Limit (für Restore)
 
 
 # ------------------------------------------------------------------------------
@@ -86,6 +91,7 @@ def ensure_db_dir(path: str):
     p = Path(path)
     if p.parent and str(p.parent) not in ("", "."):
         p.parent.mkdir(parents=True, exist_ok=True)
+
 
 def get_db():
     db = getattr(g, "_database", None)
@@ -97,11 +103,13 @@ def get_db():
         db.execute("PRAGMA synchronous=NORMAL;")
     return db
 
+
 @app.teardown_appcontext
 def close_connection(exception):
     db = getattr(g, "_database", None)
     if db is not None:
         db.close()
+
 
 def init_db():
     db = get_db()
@@ -125,12 +133,13 @@ def init_db():
     """)
     db.commit()
 
+
 with app.app_context():
     init_db()
 
 
 # ------------------------------------------------------------------------------
-# Healthcheck (Render)
+# Healthcheck
 # ------------------------------------------------------------------------------
 @app.route("/healthz")
 def healthz():
@@ -202,7 +211,7 @@ def login():
 
 
 # ------------------------------------------------------------------------------
-# Eingabe (mit Entsperren per Passwort) – bleibt nach Speichern auf Datumsseite
+# Eingabe (mit Entsperren) – bleibt nach Speichern auf Datumsseite
 # ------------------------------------------------------------------------------
 @app.route("/eingabe/<datum>", methods=["GET", "POST"])
 def eingabe(datum):
@@ -219,8 +228,7 @@ def eingabe(datum):
         tag_im_erlaubten_bereich = True
     else:
         tag_im_erlaubten_bereich = DATA_START <= datum_obj <= DATA_END
-        heute_im_bearb_fenster = EDIT_WINDOW_START <= date.today() <= EDIT_WINDOW_END
-        im_edit_zeitraum = heute_im_bearb_fenster and tag_im_erlaubten_bereich
+        im_edit_zeitraum = tag_im_erlaubten_bereich
 
     db = get_db()
     aktiver_user = session.get("name", "ADMIN")
@@ -252,10 +260,9 @@ def eingabe(datum):
             db.commit()
             session.pop("unlock_error", None)
 
-        # immer auf derselben Datumsseite bleiben
         return redirect(url_for("eingabe", datum=datum))
 
-    # --- Speichern (bleibt auf /eingabe/<datum>) ---
+    # --- Speichern ---
     if request.method == "POST" and action == "save" and im_edit_zeitraum and (DEMO_MODE or (not row or row["gespeichert"] == 0)):
         # summe_start: am ersten erlaubten Tag manuell, sonst vom Vortag
         if ist_erster_tag:
@@ -272,7 +279,7 @@ def eingabe(datum):
         bier = int(request.form.get("bier", 0) or 0)
         alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
         hendl = int(request.form.get("hendl", 0) or 0)
-        # Steuer nur mittwochs eingeben/speichern, aber NICHT in Tagesberechnung abziehen
+        # Steuer nur mittwochs (wird NICHT in Tagesberechnung abgezogen; nur am Ende im Admin-Footer)
         steuer = float(request.form.get("steuer", 0) or 0) if wochentag == 2 else 0.0
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
 
@@ -298,7 +305,7 @@ def eingabe(datum):
                   gesamt, bar_entnommen, tagessumme))
         db.commit()
 
-        # Bleibe auf der gleichen Datum-Seite (kein Sprung zur Startseite)
+        # Auf der Datumsseite bleiben
         return redirect(url_for("eingabe", datum=datum))
 
     # --- Anzeige-Daten vorbereiten ---
@@ -314,7 +321,6 @@ def eingabe(datum):
         tagessumme = row["tagessumme"] or 0
         gespeichert = row["gespeichert"] or 0
     else:
-        # Neue Seite: Startsumme abhängig vom Vortag, außer am ersten Tag
         if ist_erster_tag:
             summe_start = 0
         else:
@@ -600,9 +606,23 @@ def admin_view():
                 </table>
               </div>
 
-              <form action="{{ url_for('export_excel') }}" method="get" class="mt-3">
-                <button type="submit" class="btn btn-primary">📥 Export als Excel</button>
-              </form>
+              <div class="mt-3 d-flex flex-wrap gap-2">
+                <form action="{{ url_for('export_excel') }}" method="get" class="d-inline">
+                  <button type="submit" class="btn btn-primary">📥 Export als Excel</button>
+                </form>
+                <form action="{{ url_for('backup_db') }}" method="get" class="d-inline">
+                  <button type="submit" class="btn btn-secondary">📦 SQL Backup herunterladen</button>
+                </form>
+                <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-inline">
+                  <div class="input-group">
+                    <input type="file" name="file" accept=".sqlite,.db" class="form-control" required>
+                    <button type="submit" class="btn btn-danger"
+                            onclick="return confirm('Achtung: Dadurch wird die aktuelle Datenbank durch das Backup ersetzt. Fortfahren?')">
+                      🔁 SQL Backup einspielen
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
         </div>
@@ -677,6 +697,80 @@ def export_excel():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+# ------------------------------------------------------------------------------
+# Admin Backup Download
+# ------------------------------------------------------------------------------
+@app.route("/backup_db")
+def backup_db():
+    if not session.get("admin"):
+        return redirect(url_for("login"))
+
+    db_path = DATABASE_PATH
+    if not os.path.exists(db_path):
+        return "Keine Datenbank gefunden.", 404
+
+    return send_file(
+        db_path,
+        as_attachment=True,
+        download_name=f"Wiesn25_Backup_{date.today().isoformat()}.sqlite",
+        mimetype="application/x-sqlite3"
+    )
+
+
+# ------------------------------------------------------------------------------
+# Admin Restore Upload (Backup einspielen)
+# ------------------------------------------------------------------------------
+@app.route("/restore_db", methods=["POST"])
+def restore_db():
+    if not session.get("admin"):
+        return redirect(url_for("login"))
+
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        return "Keine Datei hochgeladen.", 400
+
+    # Dateiendung prüfen
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in {"sqlite", "db"}:
+        return "Ungültiges Dateiformat. Erlaubt sind .sqlite oder .db", 400
+
+    # Temporär speichern
+    tmp_path = f"/tmp/restore_{int(time.time())}.sqlite"
+    file.save(tmp_path)
+
+    # Prüfen, ob gültige SQLite-DB
+    try:
+        test = sqlite3.connect(tmp_path)
+        test.execute("PRAGMA schema_version;")
+        test.close()
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        return "Die hochgeladene Datei ist keine gültige SQLite-Datenbank.", 400
+
+    # Aktuelle DB sichern
+    if os.path.exists(DATABASE_PATH):
+        backup_path = f"{DATABASE_PATH}.bak_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        shutil.copy2(DATABASE_PATH, backup_path)
+
+    # Offene Verbindung schließen & ersetzen
+    try:
+        close_connection(None)
+    except Exception:
+        pass
+
+    shutil.copy2(tmp_path, DATABASE_PATH)
+    os.remove(tmp_path)
+
+    # Schema sicherstellen (falls alte DB)
+    with app.app_context():
+        init_db()
+
+    return redirect(url_for("admin_view"))
 
 
 # ------------------------------------------------------------------------------
