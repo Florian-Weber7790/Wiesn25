@@ -447,7 +447,7 @@ def eingabe(datum):
 </form>
 
 <div class="mt-3">
-  <a class="btn btn-outline-secondary btn-rounded" href="{{ url_for('login') }}">Zur Startseite</a>
+  <a class="btn btn-primary text-white btn rounded" href="{{ url_for('login') }}">Zur Startseite</a>
 </div>
 
 {% if vals['gespeichert'] %}
