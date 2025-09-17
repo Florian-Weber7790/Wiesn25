@@ -353,4 +353,21 @@ function berechne(){
   let ges=bar + bier*preisB + alk*preisA + h*preisH;
   let tag=ges - barEnt;
   if(document.getElementById("gesamt"))document.getElementById("gesamt").value=ges.toFixed(2);
-  if(document.getElementById("tagessumme"))document.getElementById("tagessumme").value=tag.toFixed(2);
+    if(document.getElementById("tagessumme"))
+      document.getElementById("tagessumme").value = tag.toFixed(2);
+}
+window.addEventListener('load', berechne);
+</script>
+</body>
+</html>
+""",
+    datum=datum,
+    name=user,
+    vals=vals,
+    im_edit=im_edit,
+    data_start=DATA_START.isoformat(),
+    preis_bier=PREIS_BIER,
+    preis_alk=PREIS_ALKOHOLFREI,
+    preis_hendl=PREIS_HENDL,
+    wtag=wtag
+)
