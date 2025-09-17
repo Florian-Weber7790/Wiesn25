@@ -64,7 +64,7 @@ DATA_START        = _get_env_date("DATA_START", "2025-09-20")
 DATA_END          = _get_env_date("DATA_END",   "2025-10-05")
 EDIT_WINDOW_START = _get_env_date("EDIT_WINDOW_START", "2025-09-18")
 EDIT_WINDOW_END   = _get_env_date("EDIT_WINDOW_END",   "2025-10-07")
-DEMO_MODE         = os.getenv("DEMO_MODE", "0") == "1"
+DEMO_MODE         = os.getenv("DEMO_MODE", "0") == "1"  # Demo: immer editierbar
 
 # Countdown-Ziel für Willkommensseite
 COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
@@ -122,8 +122,8 @@ def init_db():
 with app.app_context():
     init_db()
 
-# Hinweis: Entspricht den 4-Blöcke-Versionen – wenn DEMO_MODE=0 (Produktiv),
-# werden beim Start vorhandene Einträge gelöscht (Umschalt-Effekt Demo->Prod).
+# Hinweis: „Demo → Prod“-Umschalt-Verhalten wie zuvor:
+# Wenn DEMO_MODE=0 beim Start, werden vorhandene Einträge gelöscht.
 if not DEMO_MODE:
     with app.app_context():
         db = get_db()
@@ -268,7 +268,7 @@ def eingabe(datum):
 
     action = request.form.get("action")
 
-    # Entsperren
+    # ---------- Entsperren ----------
     if request.method == "POST" and action == "unlock":
         if not row:
             flash("Kein Eintrag vorhanden.")
@@ -288,13 +288,17 @@ def eingabe(datum):
             flash("Eintrag entsperrt 🔓")
         return redirect(url_for("eingabe", datum=datum))
 
-    # Speichern
+    # ---------- Speichern ----------
     if (request.method == "POST" and action == "save"
             and im_edit_zeitraum
             and (DEMO_MODE or (not row or row["gespeichert"] == 0))):
 
-        allow_edit = (request.form.get("allow_edit_summe_start") == "1")
-        if ist_erster_tag or allow_edit:
+        # Summe Start: nur 20.09. frei änderbar oder wenn bestehender Eintrag entsperrt ist
+        row_exists = row is not None
+        unlocked_existing = (row_exists and row["gespeichert"] == 0)
+        allow_edit_summe_start = (datum_obj == DATA_START) or unlocked_existing
+
+        if allow_edit_summe_start:
             summe_start = float(request.form.get("summe_start", 0) or 0)
         else:
             vortag = datum_obj - timedelta(days=1)
@@ -312,7 +316,7 @@ def eingabe(datum):
 
         gesamt = bar + bier * PREIS_BIER + alkoholfrei * PREIS_ALKOHOLFREI + hendl * PREIS_HENDL
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
-        tagessumme = gesamt - bar_entnommen   # Steuer nicht abziehen (nur Admin-Gesamtsumme)
+        tagessumme = gesamt - bar_entnommen   # Steuer NICHT abziehen (nur Admin-Endsumme)
 
         if row:
             db.execute("""
@@ -336,7 +340,7 @@ def eingabe(datum):
         flash("Gespeichert ✅")
         return redirect(url_for("eingabe", datum=datum))
 
-    # Anzeige vorbereiten
+    # ---------- Anzeige vorbereiten ----------
     if row:
         vals = dict(row)
     else:
@@ -353,6 +357,11 @@ def eingabe(datum):
                     alkoholfrei=0, hendl=0, steuer=0.0,
                     gesamt=0.0, bar_entnommen=0.0,
                     tagessumme=0.0, gespeichert=0)
+
+    # Flag: „Summe Start“ editierbar?
+    row_exists = row is not None
+    gespeichert_val = (row["gespeichert"] if row else 0)
+    may_edit_summe_start = (datum_obj == DATA_START) or (row_exists and gespeichert_val == 0)
 
     vortag_link = (datum_obj - timedelta(days=1)).isoformat()
     folgetag_link = (datum_obj + timedelta(days=1)).isoformat()
@@ -389,14 +398,12 @@ def eingabe(datum):
 
 <form method="post" oninput="berechne()" class="card app-card p-3">
   <input type="hidden" name="action" value="save">
-  <input type="hidden" name="allow_edit_summe_start"
-         value="{{ 1 if (im_edit_zeitraum and (datum==data_start or not vals['gespeichert'])) else 0 }}">
   <div class="row g-3">
     <div class="col-md-6">
       <label class="form-label">Summe Start (€)</label>
       <input name="summe_start" type="number" step="0.01" value="{{vals['summe_start']}}"
-             class="form-control {% if im_edit_zeitraum and (datum==data_start or not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
-             {% if not (im_edit_zeitraum and (datum==data_start or not vals['gespeichert'])) %}readonly{% endif %}>
+             class="form-control {% if may_edit_summe_start %}editable{% else %}readonly{% endif %}"
+             {% if not may_edit_summe_start %}readonly{% endif %}>
     </div>
     <div class="col-md-6">
       <label class="form-label">Bar (€)</label>
@@ -455,7 +462,7 @@ def eingabe(datum):
 </form>
 
 <div class="mt-3">
-  <a class="btn btn-outline-secondary" href="{{ url_for('login') }}">Zur Startseite</a>
+  <a class="btn btn-primary" href="{{ url_for('login') }}">Zur Startseite</a>
 </div>
 
 {% if vals['gespeichert'] %}
@@ -465,7 +472,7 @@ def eingabe(datum):
     <input type="hidden" name="action" value="unlock">
     <div class="col-md-6">
       <input type="password" name="edit_pw" class="form-control"
-             placeholder="Passwort" required>
+             placeholder="Passwort" required autocomplete="current-password">
     </div>
     <div class="col-md-6">
       <button class="btn btn-warning w-100">Editieren freischalten</button>
@@ -484,18 +491,22 @@ function berechne(){
   let barEnt=parseFloat(document.getElementById("bar_entnommen")?.value)||0;
   let ges=bar + bier*preisB + alk*preisA + h*preisH;
   let tag=ges - barEnt;
-  document.getElementById("gesamt").value = ges.toFixed(2);
-  document.getElementById("tagessumme").value = tag.toFixed(2);
+  const g=document.getElementById("gesamt"), t=document.getElementById("tagessumme");
+  if(g) g.value = ges.toFixed(2);
+  if(t) t.value = tag.toFixed(2);
 }
 window.addEventListener('load', berechne);
 </script>
 </body>
 </html>
-    """, datum=datum, name=aktiver_user, wtag=wtag,
-         vals=vals, im_edit_zeitraum=im_edit_zeitraum,
-         data_start=DATA_START.isoformat(),
-         preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
-         vortag_link=vortag_link, folgetag_link=folgetag_link)
+    """,
+        datum=datum, name=aktiver_user, wtag=wtag,
+        vals=vals, im_edit_zeitraum=im_edit_zeitraum,
+        data_start=DATA_START.isoformat(),
+        preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
+        vortag_link=vortag_link, folgetag_link=folgetag_link,
+        may_edit_summe_start=may_edit_summe_start
+    )
 
 # ============================================================================
 # Admin-Ansicht (Summen, Steuer-Abzug nur in Gesamtsumme)
@@ -556,7 +567,11 @@ def admin_view():
 <body class="container py-4">
   <div class="d-flex justify-content-between mb-3">
     <h3 class="mb-0">Gesamtsummen</h3>
-    <a href="{{ url_for('login') }}" class="btn btn-outline-secondary">Abmelden</a>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('export_excel') }}" class="btn btn-primary">📥 Excel Export</a>
+      <a href="{{ url_for('backup_db') }}" class="btn btn-secondary">📦 SQL Backup</a>
+      <a href="{{ url_for('login') }}" class="btn btn-outline-secondary">Abmelden</a>
+    </div>
   </div>
   <div class="card app-card">
     <div class="card-body p-0">
@@ -600,6 +615,13 @@ def admin_view():
           </tfoot>
         </table>
       </div>
+    </div>
+    <div class="card-footer">
+      <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2">
+        <input type="file" name="file" accept=".sqlite,.db" class="form-control" style="max-width:420px" required>
+        <button type="submit" class="btn btn-danger"
+                onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
+      </form>
     </div>
   </div>
 </body>
@@ -667,7 +689,7 @@ def export_excel():
     )
 
 # ============================================================================
-# Backup & Restore (wie in den Blöcken vorhanden)
+# Backup & Restore
 # ============================================================================
 @app.route("/backup_db")
 def backup_db():
