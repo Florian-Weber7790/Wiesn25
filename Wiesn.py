@@ -237,7 +237,7 @@ def do_login():
         session["admin"] = False
         return redirect(url_for("eingabe", datum=str(date.today())))
     flash("Bitte Mitarbeiter wählen oder Admin-Passwort eingeben.")
-    return redirect(url_for("
+    return redirect(url_for("login"))
 
 
 # ------------------------------------------------------------------------------
