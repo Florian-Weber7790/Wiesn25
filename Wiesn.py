@@ -12,9 +12,9 @@ from flask import (
 )
 import openpyxl
 
-# ------------------------------------------------------------------------------
+# ============================================================================
 # ENV / Konfiguration
-# ------------------------------------------------------------------------------
+# ============================================================================
 def _get_env(key, default=None):
     return os.getenv(key, default)
 
@@ -69,12 +69,12 @@ DEMO_MODE         = os.getenv("DEMO_MODE", "0") == "1"
 # Countdown-Ziel für Willkommensseite
 COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
 
-# ------------------------------------------------------------------------------
-# App & Datenbank
-# ------------------------------------------------------------------------------
+# ============================================================================
+# App & DB
+# ============================================================================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB für Uploads
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB Uploads
 
 def ensure_db_dir(path):
     p = Path(path)
@@ -122,24 +122,24 @@ def init_db():
 with app.app_context():
     init_db()
 
-# Wenn Demo-Mode -> beim Umschalten auf 0 löschen
+# Hinweis: Entspricht den 4-Blöcke-Versionen – wenn DEMO_MODE=0 (Produktiv),
+# werden beim Start vorhandene Einträge gelöscht (Umschalt-Effekt Demo->Prod).
 if not DEMO_MODE:
-    # alle Einträge löschen, wenn zuvor Demo-Daten vorhanden
     with app.app_context():
         db = get_db()
         db.execute("DELETE FROM eintraege")
         db.commit()
 
-# ------------------------------------------------------------------------------
+# ============================================================================
 # Healthcheck
-# ------------------------------------------------------------------------------
+# ============================================================================
 @app.route("/healthz")
 def healthz():
-    return {"status": "ok", "demo": DEMO_MODE, "time": datetime.utcnow().
-            
-# ------------------------------------------------------------------------------
+    return {"status": "ok", "demo": DEMO_MODE, "time": datetime.utcnow().isoformat()}
+
+# ============================================================================
 # Willkommen / Login mit Countdown
-# ------------------------------------------------------------------------------
+# ============================================================================
 @app.route("/", methods=["GET"])
 def login():
     return render_template_string("""
@@ -239,10 +239,9 @@ def do_login():
     flash("Bitte Mitarbeiter wählen oder Admin-Passwort eingeben.")
     return redirect(url_for("login"))
 
-
-# ------------------------------------------------------------------------------
+# ============================================================================
 # Eingabe (mit Entsperren und Bearbeitungslogik)
-# ------------------------------------------------------------------------------
+# ============================================================================
 @app.route("/eingabe/<datum>", methods=["GET", "POST"])
 def eingabe(datum):
     if "name" not in session and not session.get("admin"):
@@ -269,7 +268,7 @@ def eingabe(datum):
 
     action = request.form.get("action")
 
-    # ---------- Entsperren ----------
+    # Entsperren
     if request.method == "POST" and action == "unlock":
         if not row:
             flash("Kein Eintrag vorhanden.")
@@ -289,7 +288,7 @@ def eingabe(datum):
             flash("Eintrag entsperrt 🔓")
         return redirect(url_for("eingabe", datum=datum))
 
-    # ---------- Speichern ----------
+    # Speichern
     if (request.method == "POST" and action == "save"
             and im_edit_zeitraum
             and (DEMO_MODE or (not row or row["gespeichert"] == 0))):
@@ -313,7 +312,7 @@ def eingabe(datum):
 
         gesamt = bar + bier * PREIS_BIER + alkoholfrei * PREIS_ALKOHOLFREI + hendl * PREIS_HENDL
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
-        tagessumme = gesamt - bar_entnommen   # Steuer nicht abziehen
+        tagessumme = gesamt - bar_entnommen   # Steuer nicht abziehen (nur Admin-Gesamtsumme)
 
         if row:
             db.execute("""
@@ -337,7 +336,7 @@ def eingabe(datum):
         flash("Gespeichert ✅")
         return redirect(url_for("eingabe", datum=datum))
 
-    # ---------- Anzeige vorbereiten ----------
+    # Anzeige vorbereiten
     if row:
         vals = dict(row)
     else:
@@ -387,6 +386,7 @@ def eingabe(datum):
   <input type="date" id="datumsauswahl" class="form-control ms-auto" style="max-width:220px"
          value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
 </div>
+
 <form method="post" oninput="berechne()" class="card app-card p-3">
   <input type="hidden" name="action" value="save">
   <input type="hidden" name="allow_edit_summe_start"
@@ -453,9 +453,11 @@ def eingabe(datum):
     </div>
   </div>
 </form>
+
 <div class="mt-3">
   <a class="btn btn-outline-secondary" href="{{ url_for('login') }}">Zur Startseite</a>
 </div>
+
 {% if vals['gespeichert'] %}
 <div class="card app-card mt-3 p-3">
   <h5>Eintrag bearbeiten (entsperren)</h5>
@@ -471,6 +473,7 @@ def eingabe(datum):
   </form>
 </div>
 {% endif %}
+
 <script>
 function berechne(){
   let preisB={{preis_bier}}, preisA={{preis_alk}}, preisH={{preis_hendl}};
@@ -494,10 +497,9 @@ window.addEventListener('load', berechne);
          preis_bier=PREIS_BIER, preis_alk=PREIS_ALKOHOLFREI, preis_hendl=PREIS_HENDL,
          vortag_link=vortag_link, folgetag_link=folgetag_link)
 
-
-# ------------------------------------------------------------------------------
+# ============================================================================
 # Admin-Ansicht (Summen, Steuer-Abzug nur in Gesamtsumme)
-# ------------------------------------------------------------------------------
+# ============================================================================
 @app.route("/admin")
 def admin_view():
     if not session.get("admin"):
@@ -611,9 +613,9 @@ def admin_view():
        gesamt_nach_steuer_pp=gesamt_nach_steuer_pp
     )
 
-# ------------------------------------------------------------------------------
+# ============================================================================
 # Excel-Export (inkl. Gesamtrechnungen)
-# ------------------------------------------------------------------------------
+# ============================================================================
 @app.route("/export_excel")
 def export_excel():
     if not session.get("admin"):
@@ -657,14 +659,16 @@ def export_excel():
     out = BytesIO()
     wb.save(out)
     out.seek(0)
-    return send_file(out,
-                     as_attachment=True,
-                     download_name=f"Wiesn25_Gesamt_{date.today().isoformat()}.xlsx",
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return send_file(
+        out,
+        as_attachment=True,
+        download_name=f"Wiesn25_Gesamt_{date.today().isoformat()}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-# ------------------------------------------------------------------------------
-# Backup & Restore
-# ------------------------------------------------------------------------------
+# ============================================================================
+# Backup & Restore (wie in den Blöcken vorhanden)
+# ============================================================================
 @app.route("/backup_db")
 def backup_db():
     if not session.get("admin"):
@@ -693,8 +697,8 @@ def restore_db():
         init_db()
     return redirect(url_for("admin_view"))
 
-# ------------------------------------------------------------------------------
+# ============================================================================
 # Start
-# ------------------------------------------------------------------------------
+# ============================================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
