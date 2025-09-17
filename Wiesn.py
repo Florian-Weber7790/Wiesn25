@@ -68,7 +68,7 @@ MITARBEITER = [
 ]
 MITARBEITER_PASSWOERTER = _parse_password_map(MITARBEITER)
 
-# Tage, die eingegeben werden dürfen (Steuerfeld nur mittwochs sichtbar)
+# Datenfenster (für Anzeige/Navigation; Demo-Mode ignoriert Bearbeitungseinschr.) 
 DATA_START = _get_env_date("DATA_START", "2025-09-20")
 DATA_END   = _get_env_date("DATA_END",   "2025-10-05")
 
@@ -262,12 +262,16 @@ def eingabe(datum):
 
         return redirect(url_for("eingabe", datum=datum))
 
-    # --- Speichern ---
+    # --- Speichern (mit Summe-Start-Edit nach Entsperren) ---
     if request.method == "POST" and action == "save" and im_edit_zeitraum and (DEMO_MODE or (not row or row["gespeichert"] == 0)):
-        # summe_start: am ersten erlaubten Tag manuell, sonst vom Vortag
-        if ist_erster_tag:
+        # NEU: Wenn entsperrt (gespeichert==0), darf Summe Start immer manuell geändert werden
+        allow_edit = (request.form.get("allow_edit_summe_start") == "1")
+
+        if ist_erster_tag or allow_edit:
+            # Nimm den vom User eingegebenen Wert
             summe_start = float(request.form.get("summe_start", 0) or 0)
         else:
+            # Automatisch vom Vortag holen
             vortag = datum_obj - timedelta(days=1)
             vortag_row = db.execute(
                 "SELECT tagessumme FROM eintraege WHERE datum=? AND mitarbeiter=?",
@@ -279,11 +283,10 @@ def eingabe(datum):
         bier = int(request.form.get("bier", 0) or 0)
         alkoholfrei = int(request.form.get("alkoholfrei", 0) or 0)
         hendl = int(request.form.get("hendl", 0) or 0)
-        # Steuer nur mittwochs (wird NICHT in Tagesberechnung abgezogen; nur am Ende im Admin-Footer)
         steuer = float(request.form.get("steuer", 0) or 0) if wochentag == 2 else 0.0
         bar_entnommen = float(request.form.get("bar_entnommen", 0) or 0)
 
-        # Tagesberechnung OHNE Steuerabzug
+        # Tagesberechnung OHNE Steuerabzug (Steuer nur im Admin-Footer/Excel-Footer abziehen)
         gesamt = bar + (bier * PREIS_BIER) + (alkoholfrei * PREIS_ALKOHOLFREI) + (hendl * PREIS_HENDL)
         tagessumme = gesamt - bar_entnommen
 
@@ -376,13 +379,15 @@ def eingabe(datum):
 
           <form method="post" oninput="berechne()" class="card shadow-sm">
             <input type="hidden" name="action" value="save">
+            <!-- NEU: Flag, damit Summe Start nach Entsperren manuell gespeichert wird -->
+            <input type="hidden" name="allow_edit_summe_start" value="{{ 1 if (im_edit_zeitraum and not gespeichert) else 0 }}">
             <div class="card-body">
               <div class="row g-3">
                 <div class="col-12 col-md-6">
                   <label class="form-label">Summe Start</label>
                   <input type="number" step="0.01" name="summe_start" value="{{summe_start}}"
-                         class="form-control {% if im_edit_zeitraum and not gespeichert and ist_erster_tag %}editable{% else %}readonly{% endif %}"
-                         {% if not (im_edit_zeitraum and not gespeichert and ist_erster_tag) %}readonly{% endif %}>
+                         class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
+                         {% if not (im_edit_zeitraum and not gespeichert) %}readonly{% endif %}>
                 </div>
 
                 <div class="col-12 col-md-6">
@@ -401,7 +406,7 @@ def eingabe(datum):
 
                 <div class="col-12 col-md-4">
                   <label class="form-label">Alkoholfrei (Anzahl)</label>
-                  <input type="number" id="alkoholfrei" name="alkoholfrei" value="{{alkoholfrei}}" min="0"
+                  <input type="number" id="alkoholfrei" name="alkoholfrei" value "{{alkoholfrei}}" min="0"
                          class="form-control {% if im_edit_zeitraum and not gespeichert %}editable{% else %}readonly{% endif %}"
                          {% if not im_edit_zeitraum or gespeichert %}readonly{% endif %}>
                 </div>
