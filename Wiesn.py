@@ -330,7 +330,7 @@ body{background:#f6f7fb;}
 </head>
 <body class="container py-4">
 
-<h3 class="mb-3 text-center">Eingabe – {{name}} <small class="text-muted">({{datum}})</small></h3>
+<h3 class="mb-3 text-center">Eingabe – {{name}}</h3>
 {% with msgs = get_flashed_messages() %}
   {% if msgs %}<div class="alert alert-info text-center">{{ msgs[0] }}</div>{% endif %}
 {% endwith %}
