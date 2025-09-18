@@ -479,7 +479,7 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht (Steuer nur in Gesamtsumme abziehen)
+# Admin-Ansicht (Steuer nur in Gesamtsumme abziehen) + Reset + Export + Backup
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -533,6 +533,12 @@ body{background:#f6f7fb;}
 </style>
 </head>
 <body class="container py-4">
+  {% with msgs = get_flashed_messages() %}
+    {% if msgs %}
+      <div class="alert alert-info">{{ msgs[0] }}</div>
+    {% endif %}
+  {% endwith %}
+
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="mb-0">Gesamtsummen</h3>
     <div class="d-flex gap-2">
@@ -542,7 +548,7 @@ body{background:#f6f7fb;}
     </div>
   </div>
 
-  <div class="card app-card">
+  <div class="card app-card mb-4">
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -585,12 +591,38 @@ body{background:#f6f7fb;}
         </table>
       </div>
     </div>
+
     <div class="card-footer">
-      <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2">
+      <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 mb-3">
         <input type="file" name="file" accept=".sqlite,.db" class="form-control" style="max-width:420px" required>
         <button type="submit" class="btn btn-danger"
                 onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
       </form>
+
+      <!-- NEU: Komplett-Reset der Daten -->
+      <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
+        <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
+        <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong> aus der Datenbank-Tabelle <code>eintraege</code>.</p>
+        <form action="{{ url_for('hard_reset') }}" method="post" class="row g-2 align-items-center">
+          <div class="col-12 col-md-4">
+            <input type="password" name="confirm_pw" class="form-control" placeholder="Admin-Passwort" required autocomplete="current-password">
+          </div>
+          <div class="col-12 col-md-5">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="confirm_reset" name="confirm_reset" value="1" required>
+              <label class="form-check-label" for="confirm_reset">
+                Ich bestätige, dass alle Daten gelöscht werden sollen.
+              </label>
+            </div>
+          </div>
+          <div class="col-12 col-md-3">
+            <button type="submit" class="btn btn-outline-danger w-100"
+                    onclick="return confirm('Wirklich ALLE Daten löschen? Dieser Vorgang kann nicht rückgängig gemacht werden!')">
+              ⚠️ Komplett-Reset
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </body>
@@ -696,6 +728,38 @@ def restore_db():
     os.remove(tmp)
     with app.app_context():
         init_db()
+    flash("Datenbank wiederhergestellt.")
+    return redirect(url_for("admin_view"))
+
+# =============================================================================
+# HARD RESET (passwortgeschützt)
+# =============================================================================
+@app.route("/hard_reset", methods=["POST"])
+def hard_reset():
+    if not session.get("admin"):
+        return redirect(url_for("login"))
+
+    pw = (request.form.get("confirm_pw") or "").strip()
+    confirmed = request.form.get("confirm_reset") == "1"
+
+    if pw != ADMIN_PASS:
+        flash("Falsches Admin-Passwort. Kein Reset durchgeführt.")
+        return redirect(url_for("admin_view"))
+    if not confirmed:
+        flash("Bestätigung (Checkbox) fehlt. Kein Reset durchgeführt.")
+        return redirect(url_for("admin_view"))
+
+    db = get_db()
+    db.execute("DELETE FROM eintraege")
+    db.commit()
+    # optional aufräumen
+    try:
+        db.execute("VACUUM")
+        db.commit()
+    except Exception:
+        pass
+
+    flash("Alle Daten wurden gelöscht (Komplett-Reset).")
     return redirect(url_for("admin_view"))
 
 # =============================================================================
