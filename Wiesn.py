@@ -23,12 +23,11 @@ def _env_float(key, default):
     except Exception:
         return default
 
-def _env_date(key, default_iso):
-    return date.fromisoformat(os.getenv(key, default_iso))
+def _env_date(key, default_iso): return date.fromisoformat(os.getenv(key, default_iso))
 
 def _parse_pw_map(default_names):
     """
-    ENV: MITARBEITER_PASSWORDS="Florian:pw1,Jonas:pw2"
+    ENV: MITARBEITER_PASSWORDS="Florian:pw1,Jonas:pw2,Julia:pw3"
     Für fehlende Namen -> <name>123 (klein).
     """
     raw = os.getenv("MITARBEITER_PASSWORDS", "")
@@ -51,16 +50,16 @@ PREIS_BIER  = _env_float("PREIS_BIER", 14.01)
 PREIS_ALK   = _env_float("PREIS_ALKOHOLFREI", 6.10)
 PREIS_HENDL = _env_float("PREIS_HENDL", 22.30)
 
-# feste Mitarbeiter-Reihenfolge
+# Reihenfolge wie gewünscht
 MITARBEITER = [m.strip() for m in os.getenv(
     "MITARBEITER", "Florian,Jonas,Julia,Regina,Schorsch,Toni"
 ).split(",") if m.strip()]
 MITARBEITER_PASSW = _parse_pw_map(MITARBEITER)
 
-# Geschäftslogik-Zeiträume
-DATA_START  = _env_date("DATA_START", "2025-09-20")  # erlaubte Tage
+# Zeitfenster
+DATA_START  = _env_date("DATA_START", "2025-09-20")  # Erlaubte Tage
 DATA_END    = _env_date("DATA_END",   "2025-10-05")
-EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Bearbeitungsfenster
+EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Zeitraum, in dem Bearbeitung möglich ist
 EDIT_END    = _env_date("EDIT_WINDOW_END",   "2025-10-07")
 
 # Demo: immer editierbar
@@ -120,6 +119,13 @@ def init_db():
 
 with app.app_context():
     init_db()
+
+# Optional: Wenn DEMO_MODE==0 beim Start, alles leeren (wie früher besprochen)
+if not DEMO_MODE:
+    with app.app_context():
+        db = get_db()
+        db.execute("DELETE FROM eintraege")
+        db.commit()
 
 # =============================================================================
 # Health
@@ -211,7 +217,7 @@ updateCountdown(); setInterval(updateCountdown, 60000);
     """, mitarbeiter=MITARBEITER, demo_mode=DEMO_MODE)
 
 # =============================================================================
-# Eingabe – Zahleneingabe, Passwort-Entsperren, Summe-Start-Logik
+# Eingabe
 # =============================================================================
 @app.route("/eingabe/<datum>", methods=["GET", "POST"])
 def eingabe(datum):
@@ -255,8 +261,8 @@ def eingabe(datum):
                            ((d_obj - timedelta(days=1)).isoformat(), user)).fetchone()
             summe_start = float(v["tagessumme"] if v else 0.0)
 
-        bar   = float(request.form.get("bar") or 0)
-        bier  = int(request.form.get("bier") or 0)
+        bar   = float(request.form.get("bar")  or 0)
+        bier  = int(request.form.get("bier")   or 0)
         alk   = int(request.form.get("alkoholfrei") or 0)
         hendl = int(request.form.get("hendl") or 0)
         steuer = float(request.form.get("steuer") or 0) if wtag == 2 else 0.0
@@ -325,28 +331,29 @@ body{background:#f6f7fb;}
 <body class="container py-4">
 
 <h3 class="mb-3 text-center">Eingabe – {{name}}</h3>
-
 {% with msgs = get_flashed_messages() %}
   {% if msgs %}<div class="alert alert-info text-center">{{ msgs[0] }}</div>{% endif %}
 {% endwith %}
 
 <!-- Kalender oben zentriert -->
-<div class="d-flex flex-column align-items-center gap-2 mb-3">
-  <input type="date" id="datumsauswahl" class="form-control text-center" style="max-width:220px"
+<div class="d-flex justify-content-center mb-3">
+  <input type="date" id="datumsauswahl" class="form-control text-center" style="max-width:240px"
          value="{{datum}}" onchange="window.location.href='/eingabe/' + this.value">
-  <div>
-    <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="btn btn-outline-primary me-2">← Vortag</a>
-    <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="btn btn-outline-primary">Folgetag →</a>
-  </div>
+</div>
+
+<!-- Vortag / Folgetag zentriert -->
+<div class="d-flex justify-content-center gap-2 mb-4">
+  <a href="{{ url_for('eingabe', datum=vortag_link) }}" class="btn btn-outline-primary">← Vortag</a>
+  <a href="{{ url_for('eingabe', datum=folgetag_link) }}" class="btn btn-outline-primary">Folgetag →</a>
 </div>
 
 <form method="post" oninput="berechne()" class="card app-card p-3 mx-auto" style="max-width:900px;">
   <input type="hidden" name="action" value="save">
-  <div class="row g-3">
+  <div class="row g-3 justify-content-center">
 
     <div class="col-12 col-md-6">
       <label class="form-label">Summe Start (€)</label>
-      <input name="summe_start" type="number" inputmode="decimal" step="0.01"
+      <input name="summe_start" type="number" step="0.01"
              value="{{ '' if is_new else vals['summe_start'] }}"
              class="form-control {% if may_edit_summe %}editable{% else %}readonly{% endif %}"
              {% if not may_edit_summe %}readonly{% endif %}>
@@ -354,63 +361,63 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Bar (€)</label>
-      <input name="bar" id="bar" type="number" inputmode="decimal" step="0.01"
+      <input name="bar" id="bar" type="number" step="0.01"
              value="{{ '' if is_new else vals['bar'] }}"
-             class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
+             class="form-control {% if im_edit and not vals['gespeichert'] %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
     </div>
 
     <div class="col-12 col-md-4">
       <label class="form-label">Bier (Anzahl)</label>
-      <input name="bier" id="bier" type="number" inputmode="numeric" step="1"
+      <input name="bier" id="bier" type="number"
              value="{{ '' if is_new else vals['bier'] }}"
-             class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
+             class="form-control {% if im_edit and not vals['gespeichert'] %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
     </div>
 
     <div class="col-12 col-md-4">
       <label class="form-label">Alkoholfrei (Anzahl)</label>
-      <input name="alkoholfrei" id="alkoholfrei" type="number" inputmode="numeric" step="1"
+      <input name="alkoholfrei" id="alkoholfrei" type="number"
              value="{{ '' if is_new else vals['alkoholfrei'] }}"
-             class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
+             class="form-control {% if im_edit and not vals['gespeichert'] %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
     </div>
 
     <div class="col-12 col-md-4">
       <label class="form-label">Hendl (Anzahl)</label>
-      <input name="hendl" id="hendl" type="number" inputmode="numeric" step="1"
+      <input name="hendl" id="hendl" type="number"
              value="{{ '' if is_new else vals['hendl'] }}"
-             class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
+             class="form-control {% if im_edit and not vals['gespeichert'] %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
     </div>
 
     {% if wtag == 2 %}
     <div class="col-12 col-md-6">
       <label class="form-label">Steuer (€) – nur Mittwoch</label>
-      <input name="steuer" id="steuer" type="number" inputmode="decimal" step="0.01"
+      <input name="steuer" id="steuer" type="number" step="0.01"
              value="{{ '' if is_new else vals['steuer'] }}"
-             class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
+             class="form-control {% if im_edit and not vals['gespeichert'] %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
     </div>
     {% endif %}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Bar entnommen (€)</label>
-      <input name="bar_entnommen" id="bar_entnommen" type="number" inputmode="decimal" step="0.01"
+      <input name="bar_entnommen" id="bar_entnommen" type="number" step="0.01"
              value="{{ '' if is_new else vals['bar_entnommen'] }}"
-             class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
+             class="form-control {% if im_edit and not vals['gespeichert'] %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
     </div>
 
     <div class="col-12 col-md-6">
       <label class="form-label">Gesamt (€)</label>
-      <input id="gesamt" class="form-control calc-field" type="number" inputmode="decimal" step="0.01" readonly
+      <input id="gesamt" class="form-control calc-field" readonly
              value="{{ '' if is_new else ('%.2f' % vals['gesamt']) }}">
     </div>
 
     <div class="col-12 col-md-6">
       <label class="form-label">Tagessumme (€)</label>
-      <input id="tagessumme" class="form-control calc-field" type="number" inputmode="decimal" step="0.01" readonly
+      <input id="tagessumme" class="form-control calc-field" readonly
              value="{{ '' if is_new else ('%.2f' % vals['tagessumme']) }}">
     </div>
 
@@ -424,7 +431,6 @@ body{background:#f6f7fb;}
       {% endif %}
     </div>
   </div>
-  <input type="hidden" name="action" value="save">
 </form>
 
 <div class="mt-3 text-center">
@@ -479,7 +485,7 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht (Steuer nur in Gesamtsumme abziehen) + Reset + Export + Backup
+# Admin-Ansicht (Steuer nur in Gesamtsumme abziehen)
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -533,12 +539,6 @@ body{background:#f6f7fb;}
 </style>
 </head>
 <body class="container py-4">
-  {% with msgs = get_flashed_messages() %}
-    {% if msgs %}
-      <div class="alert alert-info">{{ msgs[0] }}</div>
-    {% endif %}
-  {% endwith %}
-
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="mb-0">Gesamtsummen</h3>
     <div class="d-flex gap-2">
@@ -548,7 +548,7 @@ body{background:#f6f7fb;}
     </div>
   </div>
 
-  <div class="card app-card mb-4">
+  <div class="card app-card">
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -591,38 +591,12 @@ body{background:#f6f7fb;}
         </table>
       </div>
     </div>
-
     <div class="card-footer">
-      <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 mb-3">
+      <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2">
         <input type="file" name="file" accept=".sqlite,.db" class="form-control" style="max-width:420px" required>
         <button type="submit" class="btn btn-danger"
                 onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
       </form>
-
-      <!-- NEU: Komplett-Reset der Daten -->
-      <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
-        <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
-        <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong> aus der Datenbank-Tabelle <code>eintraege</code>.</p>
-        <form action="{{ url_for('hard_reset') }}" method="post" class="row g-2 align-items-center">
-          <div class="col-12 col-md-4">
-            <input type="password" name="confirm_pw" class="form-control" placeholder="Admin-Passwort" required autocomplete="current-password">
-          </div>
-          <div class="col-12 col-md-5">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="confirm_reset" name="confirm_reset" value="1" required>
-              <label class="form-check-label" for="confirm_reset">
-                Ich bestätige, dass alle Daten gelöscht werden sollen.
-              </label>
-            </div>
-          </div>
-          <div class="col-12 col-md-3">
-            <button type="submit" class="btn btn-outline-danger w-100"
-                    onclick="return confirm('Wirklich ALLE Daten löschen? Dieser Vorgang kann nicht rückgängig gemacht werden!')">
-              ⚠️ Komplett-Reset
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   </div>
 </body>
@@ -714,52 +688,10 @@ def restore_db():
         return "Keine Datei.", 400
     tmp = f"/tmp/restore_{int(time.time())}.sqlite"
     f.save(tmp)
-    # Basic validity check
-    try:
-        t = sqlite3.connect(tmp)
-        t.execute("PRAGMA schema_version;")
-        t.close()
-    except Exception:
-        try: os.remove(tmp)
-        except Exception: pass
-        return "Ungültige SQLite-Datei.", 400
-
     shutil.copy2(tmp, DB_PATH)
     os.remove(tmp)
     with app.app_context():
         init_db()
-    flash("Datenbank wiederhergestellt.")
-    return redirect(url_for("admin_view"))
-
-# =============================================================================
-# HARD RESET (passwortgeschützt)
-# =============================================================================
-@app.route("/hard_reset", methods=["POST"])
-def hard_reset():
-    if not session.get("admin"):
-        return redirect(url_for("login"))
-
-    pw = (request.form.get("confirm_pw") or "").strip()
-    confirmed = request.form.get("confirm_reset") == "1"
-
-    if pw != ADMIN_PASS:
-        flash("Falsches Admin-Passwort. Kein Reset durchgeführt.")
-        return redirect(url_for("admin_view"))
-    if not confirmed:
-        flash("Bestätigung (Checkbox) fehlt. Kein Reset durchgeführt.")
-        return redirect(url_for("admin_view"))
-
-    db = get_db()
-    db.execute("DELETE FROM eintraege")
-    db.commit()
-    # optional aufräumen
-    try:
-        db.execute("VACUUM")
-        db.commit()
-    except Exception:
-        pass
-
-    flash("Alle Daten wurden gelöscht (Komplett-Reset).")
     return redirect(url_for("admin_view"))
 
 # =============================================================================
