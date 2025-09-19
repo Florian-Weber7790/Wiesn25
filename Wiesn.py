@@ -63,9 +63,6 @@ DATA_END    = _env_date("DATA_END",   "2025-10-05")
 EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Bearbeitungsfenster
 EDIT_END    = _env_date("EDIT_WINDOW_END",   "2025-10-07")
 
-# Demo: immer editierbar
-DEMO_MODE   = os.getenv("DEMO_MODE", "0") == "1"
-
 COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
 
 # =============================================================================
@@ -126,7 +123,7 @@ with app.app_context():
 # =============================================================================
 @app.route("/healthz")
 def healthz():
-    return {"status": "ok", "demo": DEMO_MODE, "time": datetime.utcnow().isoformat()}
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
 # =============================================================================
 # Login + Countdown
@@ -191,9 +188,6 @@ body{background:var(--blue);color:#fff;}
         <button class="btn btn-primary w-100">Einloggen</button>
       </form>
       <p class="note-small text-center mt-3 mb-0">Bearbeitung möglich zwischen 18.09. und 07.10.</p>
-      {% if demo_mode %}
-        <div class="alert alert-info small mt-3 mb-0">Demo-Modus aktiv: Bearbeitung jederzeit erlaubt.</div>
-      {% endif %}
     </div>
   </div>
 </div>
@@ -208,7 +202,7 @@ updateCountdown(); setInterval(updateCountdown, 60000);
 </script>
 </body>
 </html>
-    """, mitarbeiter=MITARBEITER, demo_mode=DEMO_MODE)
+    """, mitarbeiter=MITARBEITER)
 
 # =============================================================================
 # Eingabe – Zahleneingabe, Passwort-Entsperren, Summe-Start-Logik
@@ -223,11 +217,8 @@ def eingabe(datum):
     wtag = d_obj.weekday()  # 2 = Mittwoch
     erster_tag = (d_obj == DATA_START)
 
-    # Bearbeitbarkeit
-    if DEMO_MODE:
-        im_edit = True
-    else:
-        im_edit = (EDIT_START <= date.today() <= EDIT_END) and (DATA_START <= d_obj <= DATA_END)
+    # Bearbeitbarkeit: nur innerhalb Bearbeitungsfenster UND erlaubten Tagen
+    im_edit = (EDIT_START <= date.today() <= EDIT_END) and (DATA_START <= d_obj <= DATA_END)
 
     db = get_db()
     row = db.execute("SELECT * FROM eintraege WHERE datum=? AND mitarbeiter=?", (datum, user)).fetchone()
@@ -245,8 +236,8 @@ def eingabe(datum):
             flash("Falsches Passwort ❌")
         return redirect(url_for("eingabe", datum=datum))
 
-    # Speichern
-    if request.method == "POST" and action == "save" and im_edit and (DEMO_MODE or (not row or row["gespeichert"] == 0)):
+    # Speichern (nur wenn entsperrt oder neu & im Editfenster)
+    if request.method == "POST" and action == "save" and im_edit and (not row or row["gespeichert"] == 0):
         # Summe Start: nur am 20.09 oder wenn bestehender Eintrag entsperrt
         if erster_tag or (row and row["gespeichert"] == 0):
             summe_start = float(request.form.get("summe_start") or 0)
@@ -599,7 +590,7 @@ body{background:#f6f7fb;}
                 onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
       </form>
 
-      <!-- NEU: Komplett-Reset der Daten -->
+      <!-- Komplett-Reset der Daten (passwortgeschützt) -->
       <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
         <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
         <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong> aus der Datenbank-Tabelle <code>eintraege</code>.</p>
