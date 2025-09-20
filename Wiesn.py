@@ -465,12 +465,13 @@ function berechne(){
         preis_bier=PREIS_BIER, preis_alk=PREIS_ALK, preis_hendl=PREIS_HENDL,
         is_new=is_new,
         may_edit_summe=may_edit_summe,
-        vortag_link=vortag_link,
-        folgetag_link=folgetag_link
+        vortag_link=vortag_link, folgetag_link=folgetag_link
     )
 
 # =============================================================================
-# Admin-Ansicht (Steuer nur in Gesamtsumme abziehen) + Reset + Export + Backup
+# Admin-Ansicht
+#   Änderung: "Differenz Vortag" am ersten Tag = Σ(gesamt) − Σ(summe_start)
+#   (Brutto bleibt = Σ(gesamt); Steuer wird erst in Gesamtsumme abgezogen)
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -481,8 +482,9 @@ def admin_view():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt) AS tag_summe,
-          SUM(steuer) AS steuer_summe
+          SUM(gesamt)      AS tag_summe,
+          SUM(steuer)      AS steuer_summe,
+          SUM(summe_start) AS start_summe
         FROM eintraege
         WHERE gesamt IS NOT NULL
         GROUP BY datum
@@ -490,11 +492,17 @@ def admin_view():
     """).fetchall()
 
     rows_with = []
-    prev = None
-    for r in rows:
+    prev_brutto = None
+    for idx, r in enumerate(rows):
         brutto = float(r["tag_summe"] or 0.0)
+        start_sum = float(r["start_summe"] or 0.0)
         steuer = float(r["steuer_summe"] or 0.0)
-        diff = None if prev is None else (brutto - prev)
+
+        if idx == 0:
+            diff = brutto - start_sum            # <- nur hier Start abziehen
+        else:
+            diff = brutto - (prev_brutto or 0.0)  # ab 2. Tag normal
+
         pro_person = None if diff is None else (diff / 6.0)
         rows_with.append({
             "datum": r["datum"],
@@ -503,7 +511,7 @@ def admin_view():
             "diff": diff,
             "pro_person": pro_person
         })
-        prev = brutto
+        prev_brutto = brutto
 
     gesamt_brutto = sum(r["tag_summe"] for r in rows_with)
     gesamt_steuer = sum(r["steuer_summe"] for r in rows_with)
@@ -629,6 +637,7 @@ body{background:#f6f7fb;}
 
 # =============================================================================
 # Excel-Export
+#   Änderung: am ersten Tag wird die „Differenz Vortag“ als Brutto − StartSumme berechnet.
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -637,7 +646,11 @@ def export_excel():
 
     db = get_db()
     rows = db.execute("""
-        SELECT datum, SUM(gesamt) AS tag_summe, SUM(steuer) AS steuer_summe
+        SELECT
+          datum,
+          SUM(gesamt)      AS tag_summe,
+          SUM(steuer)      AS steuer_summe,
+          SUM(summe_start) AS start_summe
         FROM eintraege
         WHERE gesamt IS NOT NULL
         GROUP BY datum
@@ -645,14 +658,20 @@ def export_excel():
     """).fetchall()
 
     data = []
-    prev = None
-    for r in rows:
+    prev_brutto = None
+    for idx, r in enumerate(rows):
         brutto = float(r["tag_summe"] or 0.0)
+        start_sum = float(r["start_summe"] or 0.0)
         steuer = float(r["steuer_summe"] or 0.0)
-        diff = None if prev is None else (brutto - prev)
+
+        if idx == 0:
+            diff = brutto - start_sum
+        else:
+            diff = brutto - (prev_brutto or 0.0)
+
         pro_person = None if diff is None else (diff / 6.0)
         data.append((r["datum"], brutto, diff, pro_person, steuer))
-        prev = brutto
+        prev_brutto = brutto
 
     gesamt_brutto = sum(s for _, s, _, _, _ in data)
     gesamt_steuer = sum(st for _, _, _, _, st in data)
