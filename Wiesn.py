@@ -15,7 +15,8 @@ import openpyxl
 # =============================================================================
 # ENV / Konfiguration
 # =============================================================================
-def _env(key, default=None): return os.getenv(key, default)
+def _env(key, default=None): 
+    return os.getenv(key, default)
 
 def _env_float(key, default):
     try:
@@ -472,9 +473,11 @@ function berechne(){
 
 # =============================================================================
 # Admin-Ansicht
-#   Änderung: Am ersten Tag wird Brutto = Σ(gesamt) − Σ(summe_start) angezeigt.
-#   „Differenz Vortag“ basiert auf diesen (evtl. angepassten) Brutto-Werten.
-#   Steuer wird erst am Ende (Footer) abgezogen – nicht pro Tages-Brutto.
+#   Brutto-Spalte zeigt die tägliche Differenz:
+#   - Tag 1: Σ(Tagessumme) − Σ(Summe Start)
+#   - Ab Tag 2: Σ(Tagessumme heute) − Brutto (gestern)
+#   Umsatz/Person (Zeile) = Brutto / 6
+#   Footer: Summe Brutto & nach Steuer; Pro-Person = Summe / 6
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -485,43 +488,41 @@ def admin_view():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt)      AS tag_summe,
-          SUM(steuer)      AS steuer_summe,
-          SUM(summe_start) AS start_summe
+          SUM(tagessumme) AS tages_sum,
+          SUM(summe_start) AS start_sum,
+          SUM(steuer) AS steuer_sum
         FROM eintraege
-        WHERE gesamt IS NOT NULL
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
     rows_with = []
-    prev_adj_brutto = None
+    prev_brutto = None  # speichert den Brutto (Differenz) des Vortags
 
     for idx, r in enumerate(rows):
-        brutto = float(r["tag_summe"] or 0.0)
-        start_sum = float(r["start_summe"] or 0.0)
-        steuer = float(r["steuer_summe"] or 0.0)
+        tages_sum = float(r["tages_sum"] or 0.0)
+        start_sum = float(r["start_sum"] or 0.0)
+        steuer    = float(r["steuer_sum"] or 0.0)
 
-        # Am ersten Tag: Brutto um Startsumme kürzen
-        adj_brutto = brutto - start_sum if idx == 0 else brutto
+        if idx == 0:
+            brutto_diff = tages_sum - start_sum
+        else:
+            brutto_diff = tages_sum - (prev_brutto or 0.0)
 
-        # Differenz: am ersten Tag = adj_brutto; sonst gegen Vortag (adj)
-        diff = adj_brutto if idx == 0 else (adj_brutto - (prev_adj_brutto or 0.0))
-        pro_person = diff / 6.0 if diff is not None else None
+        pro_person = brutto_diff / 6.0 if brutto_diff is not None else None
 
         rows_with.append({
             "datum": r["datum"],
-            "tag_summe": adj_brutto,
-            "steuer_summe": steuer,
-            "diff": diff,
-            "pro_person": pro_person
+            "brutto": brutto_diff,        # Brutto-Spalte zeigt die Differenz
+            "pro_person": pro_person,
+            "steuer_sum": steuer
         })
 
-        prev_adj_brutto = adj_brutto
+        prev_brutto = brutto_diff
 
-    # Footer summiert die bereits angepassten Tages-Bruttowerte
-    gesamt_brutto = sum(r["tag_summe"] for r in rows_with)
-    gesamt_steuer = sum(r["steuer_summe"] for r in rows_with)
+    # Footer-Summen
+    gesamt_brutto = sum(r["brutto"] for r in rows_with)  # Summe der täglichen Differenzen
+    gesamt_steuer = sum(r["steuer_sum"] for r in rows_with)
     gesamt_nach_steuer = gesamt_brutto - gesamt_steuer
     gesamt_brutto_pp = (gesamt_brutto / 6.0) if rows_with else 0.0
     gesamt_nach_steuer_pp = (gesamt_nach_steuer / 6.0) if rows_with else 0.0
@@ -561,8 +562,7 @@ body{background:#f6f7fb;}
           <thead class="table-light">
             <tr>
               <th>Datum</th>
-              <th>Brutto (€)</th>
-              <th>Differenz Vortag (€)</th>
+              <th>Brutto (Differenz) (€)</th>
               <th>Umsatz pro Person (€)</th>
               <th>Steuer je Tag (€)</th>
             </tr>
@@ -571,10 +571,9 @@ body{background:#f6f7fb;}
             {% for r in rows %}
             <tr>
               <td>{{ r.datum }}</td>
-              <td>{{ "%.2f"|format(r.tag_summe) }}</td>
-              <td>{{ "%.2f"|format(r.diff) }}</td>
+              <td>{{ "%.2f"|format(r.brutto) }}</td>
               <td>{{ "%.2f"|format(r.pro_person) }}</td>
-              <td>{{ "%.2f"|format(r.steuer_summe) }}</td>
+              <td>{{ "%.2f"|format(r.steuer_sum) }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -582,14 +581,12 @@ body{background:#f6f7fb;}
             <tr class="table-secondary">
               <th>GESAMT BRUTTO</th>
               <th>{{ "%.2f"|format(gesamt_brutto) }}</th>
-              <th></th>
               <th>{{ "%.2f"|format(gesamt_brutto_pp) }}</th>
               <th>{{ "%.2f"|format(gesamt_steuer) }}</th>
             </tr>
             <tr class="table-dark">
               <th>GESAMT NACH STEUER</th>
               <th>{{ "%.2f"|format(gesamt_nach_steuer) }}</th>
-              <th></th>
               <th>{{ "%.2f"|format(gesamt_nach_steuer_pp) }}</th>
               <th></th>
             </tr>
@@ -605,7 +602,7 @@ body{background:#f6f7fb;}
                 onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
       </form>
 
-      <!-- Komplett-Reset der Daten (passwortgeschützt) -->
+      <!-- Komplett-Reset (Admin-Passwort) -->
       <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
         <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
         <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong>.</p>
@@ -641,8 +638,7 @@ body{background:#f6f7fb;}
     )
 
 # =============================================================================
-# Excel-Export
-#   Änderung: Am ersten Tag Brutto = Σ(gesamt) − Σ(summe_start); Differenz analog.
+# Excel-Export – gleiche Logik wie Admin
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -653,31 +649,33 @@ def export_excel():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt)      AS tag_summe,
-          SUM(steuer)      AS steuer_summe,
-          SUM(summe_start) AS start_summe
+          SUM(tagessumme) AS tages_sum,
+          SUM(summe_start) AS start_sum,
+          SUM(steuer) AS steuer_sum
         FROM eintraege
-        WHERE gesamt IS NOT NULL
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
     data = []
-    prev_adj_brutto = None
+    prev_brutto = None
     for idx, r in enumerate(rows):
-        brutto = float(r["tag_summe"] or 0.0)
-        start_sum = float(r["start_summe"] or 0.0)
-        steuer = float(r["steuer_summe"] or 0.0)
+        tages_sum = float(r["tages_sum"] or 0.0)
+        start_sum = float(r["start_sum"] or 0.0)
+        steuer    = float(r["steuer_sum"] or 0.0)
 
-        adj_brutto = brutto - start_sum if idx == 0 else brutto
-        diff = adj_brutto if idx == 0 else (adj_brutto - (prev_adj_brutto or 0.0))
-        pro_person = diff / 6.0 if diff is not None else None
+        if idx == 0:
+            brutto = tages_sum - start_sum
+        else:
+            brutto = tages_sum - (prev_brutto or 0.0)
 
-        data.append((r["datum"], adj_brutto, diff, pro_person, steuer))
-        prev_adj_brutto = adj_brutto
+        pro_person = brutto / 6.0 if brutto is not None else None
 
-    gesamt_brutto = sum(s for _, s, _, _, _ in data)
-    gesamt_steuer = sum(st for _, _, _, _, st in data)
+        data.append((r["datum"], brutto, pro_person, steuer))
+        prev_brutto = brutto
+
+    gesamt_brutto = sum(s for _, s, _, _ in data)
+    gesamt_steuer = sum(st for _, _, _, st in data)
     gesamt_nach_steuer = gesamt_brutto - gesamt_steuer
     gesamt_brutto_pp = gesamt_brutto / 6.0 if data else 0.0
     gesamt_nach_steuer_pp = gesamt_nach_steuer / 6.0 if data else 0.0
@@ -685,12 +683,12 @@ def export_excel():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Gesamtsummen"
-    ws.append(["Datum", "Brutto (€)", "Differenz Vortag (€)", "Umsatz/Person (€)", "Steuer je Tag (€)"])
-    for d, s, diff, pp, st in data:
-        ws.append([d, s, "" if diff is None else diff, "" if pp is None else pp, st])
+    ws.append(["Datum", "Brutto (Differenz) (€)", "Umsatz/Person (€)", "Steuer je Tag (€)"])
+    for d, s, pp, st in data:
+        ws.append([d, s, pp, st])
     ws.append([])
-    ws.append(["GESAMT BRUTTO", gesamt_brutto, "", gesamt_brutto_pp, gesamt_steuer])
-    ws.append(["GESAMT NACH STEUER", gesamt_nach_steuer, "", gesamt_nach_steuer_pp, ""])
+    ws.append(["GESAMT BRUTTO", gesamt_brutto, gesamt_brutto_pp, gesamt_steuer])
+    ws.append(["GESAMT NACH STEUER", gesamt_nach_steuer, gesamt_nach_steuer_pp, ""])
 
     out = BytesIO()
     wb.save(out)
