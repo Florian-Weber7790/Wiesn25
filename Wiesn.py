@@ -470,8 +470,9 @@ function berechne(){
 
 # =============================================================================
 # Admin-Ansicht
-#   Änderung: "Differenz Vortag" am ersten Tag = Σ(gesamt) − Σ(summe_start)
-#   (Brutto bleibt = Σ(gesamt); Steuer wird erst in Gesamtsumme abgezogen)
+#   Änderung: Am ersten Tag wird Brutto = Σ(gesamt) − Σ(summe_start) angezeigt.
+#   „Differenz Vortag“ basiert auf diesen (evtl. angepassten) Brutto-Werten.
+#   Steuer wird erst am Ende (Footer) abgezogen – nicht pro Tages-Brutto.
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -492,32 +493,37 @@ def admin_view():
     """).fetchall()
 
     rows_with = []
-    prev_brutto = None
+    prev_adj_brutto = None
+
     for idx, r in enumerate(rows):
         brutto = float(r["tag_summe"] or 0.0)
         start_sum = float(r["start_summe"] or 0.0)
         steuer = float(r["steuer_summe"] or 0.0)
 
-        if idx == 0:
-            diff = brutto - start_sum            # <- nur hier Start abziehen
-        else:
-            diff = brutto - (prev_brutto or 0.0)  # ab 2. Tag normal
+        # Am ersten Tag: Brutto um Startsumme kürzen
+        adj_brutto = brutto - start_sum if idx == 0 else brutto
 
-        pro_person = None if diff is None else (diff / 6.0)
+        # Differenz: am ersten Tag = adj_brutto; sonst gegen Vortag (adj)
+        diff = adj_brutto if idx == 0 else (adj_brutto - (prev_adj_brutto or 0.0))
+
+        pro_person = diff / 6.0 if diff is not None else None
+
         rows_with.append({
             "datum": r["datum"],
-            "tag_summe": brutto,
+            "tag_summe": adj_brutto,
             "steuer_summe": steuer,
             "diff": diff,
             "pro_person": pro_person
         })
-        prev_brutto = brutto
 
+        prev_adj_brutto = adj_brutto
+
+    # Footer summiert die bereits angepassten Tages-Bruttowerte
     gesamt_brutto = sum(r["tag_summe"] for r in rows_with)
     gesamt_steuer = sum(r["steuer_summe"] for r in rows_with)
     gesamt_nach_steuer = gesamt_brutto - gesamt_steuer
-    gesamt_brutto_pp = gesamt_brutto / 6.0 if rows_with else 0.0
-    gesamt_nach_steuer_pp = gesamt_nach_steuer / 6.0 if rows_with else 0.0
+    gesamt_brutto_pp = (gesamt_brutto / 6.0) if rows_with else 0.0
+    gesamt_nach_steuer_pp = (gesamt_nach_steuer / 6.0) if rows_with else 0.0
 
     return render_template_string("""
 <!doctype html>
@@ -565,8 +571,8 @@ body{background:#f6f7fb;}
             <tr>
               <td>{{ r.datum }}</td>
               <td>{{ "%.2f"|format(r.tag_summe) }}</td>
-              <td>{% if r.diff is not none %}{{ "%.2f"|format(r.diff) }}{% else %}-{% endif %}</td>
-              <td>{% if r.pro_person is not none %}{{ "%.2f"|format(r.pro_person) }}{% else %}-{% endif %}</td>
+              <td>{{ "%.2f"|format(r.diff) }}</td>
+              <td>{{ "%.2f"|format(r.pro_person) }}</td>
               <td>{{ "%.2f"|format(r.steuer_summe) }}</td>
             </tr>
             {% endfor %}
@@ -601,7 +607,7 @@ body{background:#f6f7fb;}
       <!-- Komplett-Reset der Daten (passwortgeschützt) -->
       <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
         <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
-        <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong> aus der Datenbank-Tabelle <code>eintraege</code>.</p>
+        <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong>.</p>
         <form action="{{ url_for('hard_reset') }}" method="post" class="row g-2 align-items-center">
           <div class="col-12 col-md-4">
             <input type="password" name="confirm_pw" class="form-control" placeholder="Admin-Passwort" required autocomplete="current-password">
@@ -609,14 +615,12 @@ body{background:#f6f7fb;}
           <div class="col-12 col-md-5">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="confirm_reset" name="confirm_reset" value="1" required>
-              <label class="form-check-label" for="confirm_reset">
-                Ich bestätige, dass alle Daten gelöscht werden sollen.
-              </label>
+              <label class="form-check-label" for="confirm_reset">Ich bestätige, dass alle Daten gelöscht werden sollen.</label>
             </div>
           </div>
           <div class="col-12 col-md-3">
             <button type="submit" class="btn btn-outline-danger w-100"
-                    onclick="return confirm('Wirklich ALLE Daten löschen? Dieser Vorgang kann nicht rückgängig gemacht werden!')">
+                    onclick="return confirm('Wirklich ALLE Daten löschen?')">
               ⚠️ Komplett-Reset
             </button>
           </div>
@@ -637,7 +641,7 @@ body{background:#f6f7fb;}
 
 # =============================================================================
 # Excel-Export
-#   Änderung: am ersten Tag wird die „Differenz Vortag“ als Brutto − StartSumme berechnet.
+#   Änderung: Am ersten Tag Brutto = Σ(gesamt) − Σ(summe_start); Differenz analog.
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -658,20 +662,18 @@ def export_excel():
     """).fetchall()
 
     data = []
-    prev_brutto = None
+    prev_adj_brutto = None
     for idx, r in enumerate(rows):
         brutto = float(r["tag_summe"] or 0.0)
         start_sum = float(r["start_summe"] or 0.0)
         steuer = float(r["steuer_summe"] or 0.0)
 
-        if idx == 0:
-            diff = brutto - start_sum
-        else:
-            diff = brutto - (prev_brutto or 0.0)
+        adj_brutto = brutto - start_sum if idx == 0 else brutto
+        diff = adj_brutto if idx == 0 else (adj_brutto - (prev_adj_brutto or 0.0))
+        pro_person = diff / 6.0 if diff is not None else None
 
-        pro_person = None if diff is None else (diff / 6.0)
-        data.append((r["datum"], brutto, diff, pro_person, steuer))
-        prev_brutto = brutto
+        data.append((r["datum"], adj_brutto, diff, pro_person, steuer))
+        prev_adj_brutto = adj_brutto
 
     gesamt_brutto = sum(s for _, s, _, _, _ in data)
     gesamt_steuer = sum(st for _, _, _, _, st in data)
@@ -762,7 +764,6 @@ def hard_reset():
     db = get_db()
     db.execute("DELETE FROM eintraege")
     db.commit()
-    # optional aufräumen
     try:
         db.execute("VACUUM")
         db.commit()
