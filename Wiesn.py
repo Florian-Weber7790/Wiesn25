@@ -58,9 +58,9 @@ MITARBEITER = [m.strip() for m in os.getenv(
 MITARBEITER_PASSW = _parse_pw_map(MITARBEITER)
 
 # Geschäftslogik-Zeiträume
-DATA_START  = _env_date("DATA_START", "2025-09-20")  # erlaubte Tage
+DATA_START  = _env_date("DATA_START", "2025-09-20")  # erlaubte Tage (Inhalt)
 DATA_END    = _env_date("DATA_END",   "2025-10-05")
-EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Bearbeitungsfenster
+EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Bearbeitungsfenster (Kalender)
 EDIT_END    = _env_date("EDIT_WINDOW_END",   "2025-10-07")
 
 COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
@@ -292,7 +292,7 @@ def eingabe(datum):
             gesamt=0.0, bar_entnommen=0.0, tagessumme=0.0, gespeichert=0
         )
 
-    is_new = row is None  # für leere Felder
+    is_new = row is None  # leere Eingabe-Felder nur für frei zu befüllende Felder
     may_edit_summe = erster_tag or (row and row["gespeichert"] == 0)
 
     vortag_link = (d_obj - timedelta(days=1)).isoformat()
@@ -311,6 +311,8 @@ body{background:#f6f7fb;}
 .editable{background:#fff7d6;}
 .readonly{background:#e9ecef;}
 .app-card{background:#fff;border:1px solid rgba(13,110,253,.08);box-shadow:0 10px 30px rgba(0,0,0,.05);border-radius:14px;}
+.btn-home{background:#0d6efd;color:#fff;}
+.btn-home:hover{filter:brightness(.95);color:#fff;}
 </style>
 </head>
 <body class="container py-4">
@@ -338,7 +340,7 @@ body{background:#f6f7fb;}
     <div class="col-12 col-md-6">
       <label class="form-label">Summe Start (€)</label>
       <input name="summe_start" type="number" inputmode="decimal" step="0.01"
-             value="{{ '' if is_new else vals['summe_start'] }}"
+             value="{{ vals['summe_start'] }}"
              class="form-control {% if may_edit_summe %}editable{% else %}readonly{% endif %}"
              {% if not may_edit_summe %}readonly{% endif %}>
     </div>
@@ -396,13 +398,13 @@ body{background:#f6f7fb;}
     <div class="col-12 col-md-6">
       <label class="form-label">Gesamt (€)</label>
       <input id="gesamt" class="form-control calc-field" type="number" inputmode="decimal" step="0.01" readonly
-             value="{{ '' if is_new else ('%.2f' % vals['gesamt']) }}">
+             value="{{ '%.2f' % vals['gesamt'] }}">
     </div>
 
     <div class="col-12 col-md-6">
       <label class="form-label">Tagessumme (€)</label>
       <input id="tagessumme" class="form-control calc-field" type="number" inputmode="decimal" step="0.01" readonly
-             value="{{ '' if is_new else ('%.2f' % vals['tagessumme']) }}">
+             value="{{ '%.2f' % vals['tagessumme'] }}">
     </div>
 
     <div class="col-12 text-center">
@@ -419,7 +421,7 @@ body{background:#f6f7fb;}
 </form>
 
 <div class="mt-3 text-center">
-  <a class="btn btn-primary" href="{{ url_for('login') }}">Zur Startseite</a>
+  <a class="btn btn-home" href="{{ url_for('login') }}">Zur Startseite</a>
 </div>
 
 {% if vals['gespeichert'] %}
@@ -505,7 +507,6 @@ def admin_view():
 
         # Differenz: am ersten Tag = adj_brutto; sonst gegen Vortag (adj)
         diff = adj_brutto if idx == 0 else (adj_brutto - (prev_adj_brutto or 0.0))
-
         pro_person = diff / 6.0 if diff is not None else None
 
         rows_with.append({
