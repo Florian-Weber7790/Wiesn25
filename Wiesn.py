@@ -15,7 +15,7 @@ import openpyxl
 # =============================================================================
 # ENV / Konfiguration
 # =============================================================================
-def _env(key, default=None): 
+def _env(key, default=None):
     return os.getenv(key, default)
 
 def _env_float(key, default):
@@ -472,7 +472,7 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht (mit Start-Zeile, Brutto=Tageswert, Differenz-Logik, ohne Summe Brutto im Footer)
+# Admin-Ansicht (Brutto und Differenz jetzt auf Basis SUM(gesamt))
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -483,7 +483,7 @@ def admin_view():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(tagessumme)  AS tages_sum,
+          SUM(gesamt)      AS brutto_sum,   -- ← SUM(gesamt) statt SUM(tagessumme)
           SUM(summe_start) AS start_sum,
           SUM(steuer)      AS steuer_sum
         FROM eintraege
@@ -502,7 +502,7 @@ def admin_view():
     prev_brutto = None
     gesamt_diff = 0.0
     for idx, r in enumerate(rows):
-        brutto = float(r["tages_sum"] or 0.0)    # Brutto (Tageswert) = Σ Tagessumme
+        brutto = float(r["brutto_sum"] or 0.0)    # Brutto (Tageswert) = Σ gesamt
         steuer = float(r["steuer_sum"] or 0.0)
 
         if idx == 0:
@@ -524,7 +524,7 @@ def admin_view():
 
     gesamt_steuer = sum(r["steuer"] for r in rows_with)
     gesamt_pp     = gesamt_diff / 6.0 if rows_with else 0.0
-    gesamt_nach_steuer = sum(r["brutto"] for r in rows_with) - gesamt_steuer  # Anzeigezweck
+    gesamt_diff_nach_steuer = gesamt_diff - gesamt_steuer
 
     return render_template_string("""
 <!doctype html>
@@ -588,7 +588,7 @@ body{background:#f6f7fb;}
             {% endfor %}
           </tbody>
           <tfoot>
-            <!-- GESAMT: Brutto-Spalte leer (nicht anzeigen), nur Differenz/PP/Steuer -->
+            <!-- GESAMT: Brutto-Spalte leer, Differenz/PP/Steuer gefüllt -->
             <tr class="table-secondary">
               <th>GESAMT</th>
               <th></th>
@@ -596,10 +596,11 @@ body{background:#f6f7fb;}
               <th>{{ "%.2f"|format(gesamt_pp) }}</th>
               <th>{{ "%.2f"|format(gesamt_steuer) }}</th>
             </tr>
+            <!-- GESAMT NACH STEUER: Brutto leer; Differenz = Summe Differenzen - Summe Steuern -->
             <tr class="table-dark">
               <th>GESAMT NACH STEUER</th>
-              <th>{{ "%.2f"|format(gesamt_nach_steuer) }}</th>
               <th></th>
+              <th>{{ "%.2f"|format(gesamt_diff_nach_steuer) }}</th>
               <th>{{ "%.2f"|format(gesamt_pp) }}</th>
               <th></th>
             </tr>
@@ -647,11 +648,11 @@ body{background:#f6f7fb;}
         gesamt_diff=gesamt_diff,
         gesamt_pp=gesamt_pp,
         gesamt_steuer=gesamt_steuer,
-        gesamt_nach_steuer=gesamt_nach_steuer
+        gesamt_diff_nach_steuer=gesamt_diff_nach_steuer
     )
 
 # =============================================================================
-# Excel-Export – mit Start-Zeile & ohne Brutto-Gesamtsumme anzeigen
+# Excel-Export – Brutto/Differenz auf Basis SUM(gesamt)
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -662,7 +663,7 @@ def export_excel():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(tagessumme)  AS tages_sum,
+          SUM(gesamt)      AS brutto_sum,   -- ← SUM(gesamt) statt SUM(tagessumme)
           SUM(summe_start) AS start_sum,
           SUM(steuer)      AS steuer_sum
         FROM eintraege
@@ -684,9 +685,8 @@ def export_excel():
     prev_brutto = None
     total_diff = 0.0
     total_steuer = 0.0
-    total_brutto_display = 0.0  # nur zur Anzeige „nach Steuer“ (kein Summenfeld für Brutto)
     for idx, r in enumerate(rows):
-        brutto = float(r["tages_sum"] or 0.0)  # Brutto (Tageswert)
+        brutto = float(r["brutto_sum"] or 0.0)  # Brutto (Tageswert) = Σ gesamt
         steuer = float(r["steuer_sum"] or 0.0)
 
         if idx == 0:
@@ -695,15 +695,15 @@ def export_excel():
             diff = brutto - (prev_brutto if prev_brutto is not None else 0.0)
 
         pp = diff / 6.0
+
         data.append((r["datum"], brutto, diff, pp, steuer))
 
         total_diff += diff
         total_steuer += steuer
-        total_brutto_display += brutto
         prev_brutto = brutto
 
     total_pp = total_diff / 6.0 if data else 0.0
-    total_nach_steuer = total_brutto_display - total_steuer
+    total_diff_after_tax = total_diff - total_steuer
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -715,7 +715,8 @@ def export_excel():
     ws.append([])
     # Footer GESAMT: Brutto-Spalte leer lassen
     ws.append(["GESAMT", "", total_diff, total_pp, total_steuer])
-    ws.append(["GESAMT NACH STEUER", total_nach_steuer, "", total_pp, ""])
+    # Footer GESAMT NACH STEUER: Brutto leer, Differenz = Summe Differenzen - Summe Steuern
+    ws.append(["GESAMT NACH STEUER", "", total_diff_after_tax, total_pp, ""])
 
     out = BytesIO()
     wb.save(out)
