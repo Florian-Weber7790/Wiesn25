@@ -15,7 +15,7 @@ import openpyxl
 # =============================================================================
 # ENV / Konfiguration
 # =============================================================================
-def _env(key, default=None): 
+def _env(key, default=None):
     return os.getenv(key, default)
 
 def _env_float(key, default):
@@ -52,16 +52,16 @@ PREIS_BIER  = _env_float("PREIS_BIER", 14.01)
 PREIS_ALK   = _env_float("PREIS_ALKOHOLFREI", 6.10)
 PREIS_HENDL = _env_float("PREIS_HENDL", 22.30)
 
-# feste Mitarbeiter-Reihenfolge (dein Wunsch)
+# feste Mitarbeiter-Reihenfolge
 MITARBEITER = [m.strip() for m in os.getenv(
     "MITARBEITER", "Florian,Jonas,Julia,Regina,Schorsch,Toni"
 ).split(",") if m.strip()]
 MITARBEITER_PASSW = _parse_pw_map(MITARBEITER)
 
 # Geschäftslogik-Zeiträume
-DATA_START  = _env_date("DATA_START", "2025-09-20")  # erlaubte Tage (Inhalt)
+DATA_START  = _env_date("DATA_START", "2025-09-20")
 DATA_END    = _env_date("DATA_END",   "2025-10-05")
-EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Bearbeitungsfenster (Kalender)
+EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")
 EDIT_END    = _env_date("EDIT_WINDOW_END",   "2025-10-07")
 
 COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
@@ -297,8 +297,8 @@ def eingabe(datum):
     is_new = row is None  # leere Eingabe-Felder nur für frei zu befüllende Felder
     may_edit_summe = erster_tag or (row and row["gespeichert"] == 0)
 
-    vortag_link = (d_obj - timedelta(days=1)).isoformat()
-    folgetag_link = (d_obj + timedelta(days=1)).isoformat()
+    vortag_link = (date.fromisoformat(datum) - timedelta(days=1)).isoformat()
+    folgetag_link = (date.fromisoformat(datum) + timedelta(days=1)).isoformat()
 
     return render_template_string("""
 <!doctype html>
@@ -474,7 +474,7 @@ window.addEventListener('load', berechne);
     )
 
 # =============================================================================
-# Admin-Ansicht – Start-Zeile, kumulative Entnahme im Gesamtumsatz, Kontrolle-Spalte
+# Admin-Ansicht – Anpassung Gesamtumsatz: Geldbeutel + Entnommen BIS Vortag
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -482,7 +482,6 @@ def admin_view():
         return redirect(url_for("login"))
 
     db = get_db()
-    # hole pro Datum Summen
     rows = db.execute("""
         SELECT
           datum,
@@ -499,10 +498,8 @@ def admin_view():
         flash("Noch keine Daten vorhanden.")
         return render_template_string("<p class='p-3'>Keine Daten.</p>")
 
-    # Kumulative Entnahme ab Startdatum aufbauen
-    cum_entnommen = 0.0
-
-    data = []  # Tageszeilen
+    # Kumulative Entnahme — aber für die Tagesberechnung wird NUR bis Vortag verwendet.
+    cum_entnommen_prev = 0.0  # Summe Entnahmen bis zum Vortag
     prev_gesamtumsatz = None
 
     # Laufende Summen für Footer
@@ -511,7 +508,7 @@ def admin_view():
     total_diff = 0.0
     total_steuer = 0.0
 
-    # --- Start-Zeile (oberhalb des ersten Datums) ---
+    # Start-Zeile
     first = rows[0]
     first_start_sum = float(first["start_sum"] or 0.0)
     start_row = {
@@ -526,7 +523,7 @@ def admin_view():
         "kontrolle": None
     }
 
-    # --- Tageszeilen ---
+    data = []
     for idx, r in enumerate(rows):
         datum = r["datum"]
         geldbeutel = float(r["geldbeutel_sum"] or 0.0)
@@ -534,18 +531,14 @@ def admin_view():
         steuer = float(r["steuer_sum"] or 0.0)
         start_sum = float(r["start_sum"] or 0.0)
 
-        # Kontrolle = Summe Gesamt - Summe Start (pro Tag, über alle Mitarbeiter)
+        # Kontrolle = Summe Gesamt - Summe Start (pro Tag)
         kontrolle = geldbeutel - start_sum
 
-        # kumulative Entnahme seit Startdatum (inkl. heutigem Tag)
-        cum_entnommen += entnommen
-
-        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme bis heute
-        gesamtumsatz = geldbeutel + cum_entnommen
+        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG
+        gesamtumsatz = geldbeutel + cum_entnommen_prev
 
         # Differenz
         if idx == 0:
-            # am ersten Tag: Gesamtumsatz - SummeStart
             diff = gesamtumsatz - start_sum
         else:
             diff = gesamtumsatz - (prev_gesamtumsatz or 0.0)
@@ -564,19 +557,19 @@ def admin_view():
             "kontrolle": kontrolle
         })
 
-        # Tots (Start-Zeile zählt nicht in Footer)
+        # Footer-Summen
         total_geldbeutel += geldbeutel
         total_entnommen += entnommen
         total_steuer += steuer
         total_diff += diff
 
+        # Update für nächsten Tag: ab morgen zählt auch die heutige Entnahme
+        cum_entnommen_prev += entnommen
         prev_gesamtumsatz = gesamtumsatz
 
     total_pro_person = (total_diff / 6.0) if data else 0.0
-    # Gesamt nach Steuer = Summe Diff - Summe Steuer
     total_nach_steuer = total_diff - total_steuer
 
-    # Reihenfolge: Start-Zeile, dann Daten
     rows_out = [start_row] + data
 
     return render_template_string("""
@@ -711,7 +704,7 @@ body{background:#f6f7fb;}
     )
 
 # =============================================================================
-# Excel-Export – inkl. Start-Zeile, kumulative Entnahme & Kontrolle-Spalte
+# Excel-Export – gleiche Logik: Gesamtumsatz = Geldbeutel + Entnommen BIS Vortag
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -756,7 +749,7 @@ def export_excel():
     first_start_sum = float(rows[0]["start_sum"] or 0.0)
     ws.append(["Start", first_start_sum, "", "", "", "", "", ""])
 
-    cum_entnommen = 0.0
+    cum_entnommen_prev = 0.0
     prev_gesamtumsatz = None
 
     total_geldbeutel = 0.0
@@ -773,8 +766,8 @@ def export_excel():
 
         kontrolle = geldbeutel - start_sum
 
-        cum_entnommen += entnommen
-        gesamtumsatz = geldbeutel + cum_entnommen
+        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG
+        gesamtumsatz = geldbeutel + cum_entnommen_prev
 
         if idx == 0:
             diff = gesamtumsatz - start_sum
@@ -789,6 +782,9 @@ def export_excel():
         total_entnommen += entnommen
         total_diff += diff
         total_steuer += steuer
+
+        # Update für nächsten Tag (heutige Entnahme zählt erst morgen dazu)
+        cum_entnommen_prev += entnommen
         prev_gesamtumsatz = gesamtumsatz
 
     ws.append([])
@@ -802,7 +798,6 @@ def export_excel():
         total_steuer,
         ""
     ])
-    # Gesamt nach Steuer (Differenz - Steuer) in der Differenz-Spalte
     ws.append([
         "GESAMT NACH STEUER",
         "",
