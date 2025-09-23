@@ -474,7 +474,7 @@ window.addEventListener('load', berechne);
     )
 
 # =============================================================================
-# Admin-Ansicht (6-Spalten-Logik)
+# Admin-Ansicht – Start-Zeile, kumulative Entnahme im Gesamtumsatz, Kontrolle-Spalte
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -482,21 +482,27 @@ def admin_view():
         return redirect(url_for("login"))
 
     db = get_db()
+    # hole pro Datum Summen
     rows = db.execute("""
         SELECT
           datum,
           SUM(gesamt)        AS geldbeutel_sum,   -- Σ gesamt (im Geldbeutel)
           SUM(bar_entnommen) AS entnommen_sum,    -- Σ Bar entnommen (heute)
-          SUM(steuer)        AS steuer_sum        -- Σ Steuer (heute)
+          SUM(steuer)        AS steuer_sum,       -- Σ Steuer (heute)
+          SUM(summe_start)   AS start_sum         -- Σ Summe Start (heute)
         FROM eintraege
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
-    # Für Gesamtumsatz brauchen wir Entnommen vom Vortag
-    entn_by_date = {r["datum"]: float(r["entnommen_sum"] or 0.0) for r in rows}
+    if not rows:
+        flash("Noch keine Daten vorhanden.")
+        return render_template_string("<p class='p-3'>Keine Daten.</p>")
 
-    data = []
+    # Kumulative Entnahme ab Startdatum aufbauen
+    cum_entnommen = 0.0
+
+    data = []  # Tageszeilen
     prev_gesamtumsatz = None
 
     # Laufende Summen für Footer
@@ -505,47 +511,73 @@ def admin_view():
     total_diff = 0.0
     total_steuer = 0.0
 
+    # --- Start-Zeile (oberhalb des ersten Datums) ---
+    first = rows[0]
+    first_start_sum = float(first["start_sum"] or 0.0)
+    start_row = {
+        "is_start": True,
+        "datum": "Start",
+        "geldbeutel": first_start_sum,  # zeigt Summe Start (Tag 1) in der 1. Spalte
+        "entnommen": None,
+        "gesamtumsatz": None,
+        "diff": None,
+        "pro_person": None,
+        "steuer": None,
+        "kontrolle": None
+    }
+
+    # --- Tageszeilen ---
     for idx, r in enumerate(rows):
         datum = r["datum"]
         geldbeutel = float(r["geldbeutel_sum"] or 0.0)
         entnommen = float(r["entnommen_sum"] or 0.0)
         steuer = float(r["steuer_sum"] or 0.0)
+        start_sum = float(r["start_sum"] or 0.0)
 
-        # Gesamtumsatz = Geldbeutel heute + Entnommen vom Vortag
+        # Kontrolle = Summe Gesamt - Summe Start (pro Tag, über alle Mitarbeiter)
+        kontrolle = geldbeutel - start_sum
+
+        # kumulative Entnahme seit Startdatum (inkl. heutigem Tag)
+        cum_entnommen += entnommen
+
+        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme bis heute
+        gesamtumsatz = geldbeutel + cum_entnommen
+
+        # Differenz
         if idx == 0:
-            gesamtumsatz = geldbeutel  # kein Vortag
+            # am ersten Tag: Gesamtumsatz - SummeStart
+            diff = gesamtumsatz - start_sum
         else:
-            vortag = rows[idx - 1]["datum"]
-            gesamtumsatz = geldbeutel + entn_by_date.get(vortag, 0.0)
+            diff = gesamtumsatz - (prev_gesamtumsatz or 0.0)
 
-        # Differenz zum Vortag
-        if prev_gesamtumsatz is None:
-            diff = None
-            pro_person = None
-        else:
-            diff = gesamtumsatz - prev_gesamtumsatz
-            pro_person = diff / 6.0
+        pro_person = diff / 6.0
 
         data.append({
+            "is_start": False,
             "datum": datum,
             "geldbeutel": geldbeutel,
             "entnommen": entnommen,
             "gesamtumsatz": gesamtumsatz,
             "diff": diff,
-            "pro_person": (None if diff is None else pro_person),
+            "pro_person": pro_person,
             "steuer": steuer,
+            "kontrolle": kontrolle
         })
 
-        # Tots
+        # Tots (Start-Zeile zählt nicht in Footer)
         total_geldbeutel += geldbeutel
         total_entnommen += entnommen
         total_steuer += steuer
-        if diff is not None:
-            total_diff += diff
+        total_diff += diff
 
         prev_gesamtumsatz = gesamtumsatz
 
     total_pro_person = (total_diff / 6.0) if data else 0.0
+    # Gesamt nach Steuer = Summe Diff - Summe Steuer
+    total_nach_steuer = total_diff - total_steuer
+
+    # Reihenfolge: Start-Zeile, dann Daten
+    rows_out = [start_row] + data
 
     return render_template_string("""
 <!doctype html>
@@ -588,19 +620,29 @@ body{background:#f6f7fb;}
               <th>Differenz (€)</th>
               <th>Umsatz pro Person (€)</th>
               <th>Steuer je Tag (€)</th>
+              <th>Kontrolle (€)</th>
             </tr>
           </thead>
           <tbody>
             {% for r in rows %}
-            <tr>
-              <td>{{ r.datum }}</td>
-              <td>{{ "%.2f"|format(r.geldbeutel) }}</td>
-              <td>{{ "%.2f"|format(r.entnommen) }}</td>
-              <td>{{ "%.2f"|format(r.gesamtumsatz) }}</td>
-              <td>{% if r.diff is none %}-{% else %}{{ "%.2f"|format(r.diff) }}{% endif %}</td>
-              <td>{% if r.pro_person is none %}-{% else %}{{ "%.2f"|format(r.pro_person) }}{% endif %}</td>
-              <td>{{ "%.2f"|format(r.steuer) }}</td>
-            </tr>
+            {% if r.is_start %}
+              <tr class="table-info">
+                <td class="fw-semibold">Start</td>
+                <td>{{ "%.2f"|format(r.geldbeutel) }}</td>
+                <td></td><td></td><td></td><td></td><td></td><td></td>
+              </tr>
+            {% else %}
+              <tr>
+                <td>{{ r.datum }}</td>
+                <td>{{ "%.2f"|format(r.geldbeutel) }}</td>
+                <td>{{ "%.2f"|format(r.entnommen) }}</td>
+                <td>{{ "%.2f"|format(r.gesamtumsatz) }}</td>
+                <td>{{ "%.2f"|format(r.diff) }}</td>
+                <td>{{ "%.2f"|format(r.pro_person) }}</td>
+                <td>{{ "%.2f"|format(r.steuer) }}</td>
+                <td>{{ "%.2f"|format(r.kontrolle) }}</td>
+              </tr>
+            {% endif %}
             {% endfor %}
           </tbody>
           <tfoot>
@@ -612,6 +654,13 @@ body{background:#f6f7fb;}
               <th>{{ "%.2f"|format(total_diff) }}</th>
               <th>{{ "%.2f"|format(total_pro_person) }}</th>
               <th>{{ "%.2f"|format(total_steuer) }}</th>
+              <th></th>
+            </tr>
+            <tr class="table-dark">
+              <th>GESAMT NACH STEUER</th>
+              <th></th><th></th><th></th>
+              <th>{{ "%.2f"|format(total_nach_steuer) }}</th>
+              <th></th><th></th><th></th>
             </tr>
           </tfoot>
         </table>
@@ -652,16 +701,17 @@ body{background:#f6f7fb;}
 </body>
 </html>
     """,
-        rows=data,
+        rows=rows_out,
         total_geldbeutel=total_geldbeutel,
         total_entnommen=total_entnommen,
         total_diff=total_diff,
         total_pro_person=total_pro_person,
-        total_steuer=total_steuer
+        total_steuer=total_steuer,
+        total_nach_steuer=total_nach_steuer
     )
 
 # =============================================================================
-# Excel-Export – exakt wie Admin-Ansicht
+# Excel-Export – inkl. Start-Zeile, kumulative Entnahme & Kontrolle-Spalte
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -674,16 +724,41 @@ def export_excel():
           datum,
           SUM(gesamt)        AS geldbeutel_sum,
           SUM(bar_entnommen) AS entnommen_sum,
-          SUM(steuer)        AS steuer_sum
+          SUM(steuer)        AS steuer_sum,
+          SUM(summe_start)   AS start_sum
         FROM eintraege
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
-    entn_by_date = {r["datum"]: float(r["entnommen_sum"] or 0.0) for r in rows}
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Tagesübersicht"
 
-    data = []
+    ws.append([
+        "Datum",
+        "Gesamt im Geldbeutel (€)",
+        "Entnommen (€)",
+        "Gesamtumsatz (€)",
+        "Differenz (€)",
+        "Umsatz/Person (€)",
+        "Steuer je Tag (€)",
+        "Kontrolle (€)"
+    ])
+
+    if not rows:
+        out = BytesIO(); wb.save(out); out.seek(0)
+        return send_file(out, as_attachment=True,
+                         download_name=f"Wiesn25_Gesamt_{date.today().isoformat()}.xlsx",
+                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # Start-Zeile
+    first_start_sum = float(rows[0]["start_sum"] or 0.0)
+    ws.append(["Start", first_start_sum, "", "", "", "", "", ""])
+
+    cum_entnommen = 0.0
     prev_gesamtumsatz = None
+
     total_geldbeutel = 0.0
     total_entnommen = 0.0
     total_diff = 0.0
@@ -694,52 +769,28 @@ def export_excel():
         geldbeutel = float(r["geldbeutel_sum"] or 0.0)
         entnommen = float(r["entnommen_sum"] or 0.0)
         steuer = float(r["steuer_sum"] or 0.0)
+        start_sum = float(r["start_sum"] or 0.0)
+
+        kontrolle = geldbeutel - start_sum
+
+        cum_entnommen += entnommen
+        gesamtumsatz = geldbeutel + cum_entnommen
 
         if idx == 0:
-            gesamtumsatz = geldbeutel
+            diff = gesamtumsatz - start_sum
         else:
-            vortag = rows[idx - 1]["datum"]
-            gesamtumsatz = geldbeutel + entn_by_date.get(vortag, 0.0)
+            diff = gesamtumsatz - (prev_gesamtumsatz or 0.0)
 
-        if prev_gesamtumsatz is None:
-            diff = None
-            pp = None
-        else:
-            diff = gesamtumsatz - prev_gesamtumsatz
-            pp = diff / 6.0
+        pp = diff / 6.0
 
-        data.append((datum, geldbeutel, entnommen, gesamtumsatz, diff, pp, steuer))
+        ws.append([datum, geldbeutel, entnommen, gesamtumsatz, diff, pp, steuer, kontrolle])
 
         total_geldbeutel += geldbeutel
         total_entnommen += entnommen
+        total_diff += diff
         total_steuer += steuer
-        if diff is not None:
-            total_diff += diff
-
         prev_gesamtumsatz = gesamtumsatz
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Tagesübersicht"
-    ws.append([
-        "Datum",
-        "Gesamt im Geldbeutel (€)",
-        "Entnommen (€)",
-        "Gesamtumsatz (€)",
-        "Differenz (€)",
-        "Umsatz/Person (€)",
-        "Steuer je Tag (€)"
-    ])
-    for d, gb, entn, gu, diff, pp, st in data:
-        ws.append([
-            d,
-            gb,
-            entn,
-            gu,
-            "" if diff is None else diff,
-            "" if pp is None else pp,
-            st
-        ])
     ws.append([])
     ws.append([
         "GESAMT",
@@ -747,8 +798,20 @@ def export_excel():
         total_entnommen,
         "",
         total_diff,
-        (total_diff/6.0) if data else 0.0,
-        total_steuer
+        (total_diff/6.0) if rows else 0.0,
+        total_steuer,
+        ""
+    ])
+    # Gesamt nach Steuer (Differenz - Steuer) in der Differenz-Spalte
+    ws.append([
+        "GESAMT NACH STEUER",
+        "",
+        "",
+        "",
+        total_diff - total_steuer,
+        "",
+        "",
+        ""
     ])
 
     out = BytesIO()
@@ -845,5 +908,4 @@ def hard_reset():
 # Start
 # =============================================================================
 if __name__ == "__main__":
-    
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
