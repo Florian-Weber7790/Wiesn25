@@ -15,7 +15,7 @@ import openpyxl
 # =============================================================================
 # ENV / Konfiguration
 # =============================================================================
-def _env(key, default=None):
+def _env(key, default=None): 
     return os.getenv(key, default)
 
 def _env_float(key, default):
@@ -59,9 +59,9 @@ MITARBEITER = [m.strip() for m in os.getenv(
 MITARBEITER_PASSW = _parse_pw_map(MITARBEITER)
 
 # Geschäftslogik-Zeiträume
-DATA_START  = _env_date("DATA_START", "2025-09-20")
+DATA_START  = _env_date("DATA_START", "2025-09-20")  # erlaubte Tage (Inhalt)
 DATA_END    = _env_date("DATA_END",   "2025-10-05")
-EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")
+EDIT_START  = _env_date("EDIT_WINDOW_START", "2025-09-18")  # Bearbeitungsfenster (Kalender)
 EDIT_END    = _env_date("EDIT_WINDOW_END",   "2025-10-07")
 
 COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
@@ -239,7 +239,7 @@ def eingabe(datum):
 
     # Speichern (nur wenn entsperrt oder neu & im Editfenster)
     if request.method == "POST" and action == "save" and im_edit and (not row or row["gespeichert"] == 0):
-        # Summe Start: nur am 20.09. direkt, sonst vom Vortag (oder wenn entsperrt)
+        # Summe Start: nur am 20.09 oder wenn bestehender Eintrag entsperrt
         if erster_tag or (row and row["gespeichert"] == 0):
             summe_start = float(request.form.get("summe_start") or 0)
         else:
@@ -273,7 +273,6 @@ def eingabe(datum):
                  steuer, gesamt, bar_entn, tagessumme))
         db.commit()
         flash("Gespeichert ✅")
-        # auf derselben Datum-Seite bleiben
         return redirect(url_for("eingabe", datum=datum))
 
     # Anzeige-Werte
@@ -297,8 +296,8 @@ def eingabe(datum):
     is_new = row is None  # leere Eingabe-Felder nur für frei zu befüllende Felder
     may_edit_summe = erster_tag or (row and row["gespeichert"] == 0)
 
-    vortag_link = (date.fromisoformat(datum) - timedelta(days=1)).isoformat()
-    folgetag_link = (date.fromisoformat(datum) + timedelta(days=1)).isoformat()
+    vortag_link = (d_obj - timedelta(days=1)).isoformat()
+    folgetag_link = (d_obj + timedelta(days=1)).isoformat()
 
     return render_template_string("""
 <!doctype html>
@@ -341,7 +340,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Summe Start (€)</label>
-      <input name="summe_start" type="number" inputmode="decimal" step="0.01" min="0"
+      <input name="summe_start" type="number" inputmode="decimal" step="0.01"
              value="{{ vals['summe_start'] }}"
              class="form-control {% if may_edit_summe %}editable{% else %}readonly{% endif %}"
              {% if not may_edit_summe %}readonly{% endif %}>
@@ -349,7 +348,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Bar (€)</label>
-      <input name="bar" id="bar" type="number" inputmode="decimal" step="0.01" min="0"
+      <input name="bar" id="bar" type="number" inputmode="decimal" step="0.01"
              value="{{ '' if is_new else vals['bar'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -357,7 +356,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-4">
       <label class="form-label">Bier (Anzahl)</label>
-      <input name="bier" id="bier" type="number" inputmode="numeric" step="1" min="0"
+      <input name="bier" id="bier" type="number" inputmode="numeric" step="1"
              value="{{ '' if is_new else vals['bier'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -365,7 +364,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-4">
       <label class="form-label">Alkoholfrei (Anzahl)</label>
-      <input name="alkoholfrei" id="alkoholfrei" type="number" inputmode="numeric" step="1" min="0"
+      <input name="alkoholfrei" id="alkoholfrei" type="number" inputmode="numeric" step="1"
              value="{{ '' if is_new else vals['alkoholfrei'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -373,7 +372,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-4">
       <label class="form-label">Hendl (Anzahl)</label>
-      <input name="hendl" id="hendl" type="number" inputmode="numeric" step="1" min="0"
+      <input name="hendl" id="hendl" type="number" inputmode="numeric" step="1"
              value="{{ '' if is_new else vals['hendl'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -382,7 +381,7 @@ body{background:#f6f7fb;}
     {% if wtag == 2 %}
     <div class="col-12 col-md-6">
       <label class="form-label">Steuer (€) – nur Mittwoch</label>
-      <input name="steuer" id="steuer" type="number" inputmode="decimal" step="0.01" min="0"
+      <input name="steuer" id="steuer" type="number" inputmode="decimal" step="0.01"
              value="{{ '' if is_new else vals['steuer'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -391,7 +390,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Bar entnommen (€)</label>
-      <input name="bar_entnommen" id="bar_entnommen" type="number" inputmode="decimal" step="0.01" min="0"
+      <input name="bar_entnommen" id="bar_entnommen" type="number" inputmode="decimal" step="0.01"
              value="{{ '' if is_new else vals['bar_entnommen'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -456,7 +455,6 @@ function berechne(){
   if(g) g.value = isFinite(ges) ? ges.toFixed(2) : "";
   if(t) t.value = isFinite(tag) ? tag.toFixed(2) : "";
 }
-window.addEventListener('load', berechne);
 </script>
 
 </body>
@@ -474,7 +472,7 @@ window.addEventListener('load', berechne);
     )
 
 # =============================================================================
-# Admin-Ansicht – Anpassung Gesamtumsatz: Geldbeutel + Entnommen BIS Vortag
+# Admin-Ansicht (mit Start-Zeile, neuem Footer-Verhalten)
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -498,15 +496,16 @@ def admin_view():
         flash("Noch keine Daten vorhanden.")
         return render_template_string("<p class='p-3'>Keine Daten.</p>")
 
-    # Kumulative Entnahme — aber für die Tagesberechnung wird NUR bis Vortag verwendet.
+    # Kumulative Entnahme — für die Tagesberechnung wird NUR bis Vortag verwendet.
     cum_entnommen_prev = 0.0  # Summe Entnahmen bis zum Vortag
     prev_gesamtumsatz = None
 
     # Laufende Summen für Footer
-    total_geldbeutel = 0.0
     total_entnommen = 0.0
     total_diff = 0.0
     total_steuer = 0.0
+    total_kontrolle = 0.0
+    last_gesamtumsatz = 0.0  # im Footer „Gesamtumsatz“ = letzter Tageswert
 
     # Start-Zeile
     first = rows[0]
@@ -558,10 +557,11 @@ def admin_view():
         })
 
         # Footer-Summen
-        total_geldbeutel += geldbeutel
         total_entnommen += entnommen
         total_steuer += steuer
         total_diff += diff
+        total_kontrolle += kontrolle
+        last_gesamtumsatz = gesamtumsatz  # für Footer „Gesamtumsatz“ = letzter Tageswert
 
         # Update für nächsten Tag: ab morgen zählt auch die heutige Entnahme
         cum_entnommen_prev += entnommen
@@ -641,18 +641,18 @@ body{background:#f6f7fb;}
           <tfoot>
             <tr class="table-secondary">
               <th>GESAMT</th>
-              <th>{{ "%.2f"|format(total_geldbeutel) }}</th>
+              <th></th>  <!-- kein Addieren der 1. Spalte -->
               <th>{{ "%.2f"|format(total_entnommen) }}</th>
-              <th></th>
+              <th>{{ "%.2f"|format(last_gesamtumsatz) }}</th> <!-- letzter Tageswert -->
               <th>{{ "%.2f"|format(total_diff) }}</th>
               <th>{{ "%.2f"|format(total_pro_person) }}</th>
               <th>{{ "%.2f"|format(total_steuer) }}</th>
-              <th></th>
+              <th>{{ "%.2f"|format(total_kontrolle) }}</th> <!-- Summe Kontrolle -->
             </tr>
             <tr class="table-dark">
               <th>GESAMT NACH STEUER</th>
               <th></th><th></th><th></th>
-              <th>{{ "%.2f"|format(total_nach_steuer) }}</th>
+              <th>{{ "%.2f"|format(total_diff - total_steuer) }}</th>
               <th></th><th></th><th></th>
             </tr>
           </tfoot>
@@ -667,7 +667,6 @@ body{background:#f6f7fb;}
                 onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
       </form>
 
-      <!-- Komplett-Reset (Admin-Passwort) -->
       <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
         <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
         <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong>.</p>
@@ -695,16 +694,17 @@ body{background:#f6f7fb;}
 </html>
     """,
         rows=rows_out,
-        total_geldbeutel=total_geldbeutel,
         total_entnommen=total_entnommen,
         total_diff=total_diff,
         total_pro_person=total_pro_person,
         total_steuer=total_steuer,
-        total_nach_steuer=total_nach_steuer
+        total_nach_steuer=total_nach_steuer,
+        total_kontrolle=total_kontrolle,
+        last_gesamtumsatz=last_gesamtumsatz
     )
 
 # =============================================================================
-# Excel-Export – gleiche Logik: Gesamtumsatz = Geldbeutel + Entnommen BIS Vortag
+# Excel-Export (spiegelt Admin-Logik inkl. Footer)
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -752,10 +752,11 @@ def export_excel():
     cum_entnommen_prev = 0.0
     prev_gesamtumsatz = None
 
-    total_geldbeutel = 0.0
     total_entnommen = 0.0
     total_diff = 0.0
     total_steuer = 0.0
+    total_kontrolle = 0.0
+    last_gesamtumsatz = 0.0
 
     for idx, r in enumerate(rows):
         datum = r["datum"]
@@ -765,8 +766,6 @@ def export_excel():
         start_sum = float(r["start_sum"] or 0.0)
 
         kontrolle = geldbeutel - start_sum
-
-        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG
         gesamtumsatz = geldbeutel + cum_entnommen_prev
 
         if idx == 0:
@@ -778,25 +777,25 @@ def export_excel():
 
         ws.append([datum, geldbeutel, entnommen, gesamtumsatz, diff, pp, steuer, kontrolle])
 
-        total_geldbeutel += geldbeutel
         total_entnommen += entnommen
         total_diff += diff
         total_steuer += steuer
+        total_kontrolle += kontrolle
+        last_gesamtumsatz = gesamtumsatz
 
-        # Update für nächsten Tag (heutige Entnahme zählt erst morgen dazu)
         cum_entnommen_prev += entnommen
         prev_gesamtumsatz = gesamtumsatz
 
     ws.append([])
     ws.append([
         "GESAMT",
-        total_geldbeutel,
+        "",  # kein Addieren von „Gesamt im Geldbeutel“
         total_entnommen,
-        "",
+        last_gesamtumsatz,  # letzter Tageswert
         total_diff,
         (total_diff/6.0) if rows else 0.0,
         total_steuer,
-        ""
+        total_kontrolle  # Summe Kontrolle
     ])
     ws.append([
         "GESAMT NACH STEUER",
@@ -846,21 +845,11 @@ def restore_db():
     f.save(tmp)
     # Basic validity check
     try:
-        t = sqlite3.connect(tmp)
-        t.execute("PRAGMA schema_version;")
-        t.close()
+        t = sqlite3.connect(tmp); t.execute("PRAGMA schema_version;"); t.close()
     except Exception:
         try: os.remove(tmp)
         except Exception: pass
         return "Ungültige SQLite-Datei.", 400
-
-    # Sicherung der aktuellen DB (optional)
-    if os.path.exists(DB_PATH):
-        backup_path = f"{DB_PATH}.bak_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-        try:
-            shutil.copy2(DB_PATH, backup_path)
-        except Exception:
-            pass
 
     shutil.copy2(tmp, DB_PATH)
     os.remove(tmp)
@@ -891,8 +880,7 @@ def hard_reset():
     db.execute("DELETE FROM eintraege")
     db.commit()
     try:
-        db.execute("VACUUM")
-        db.commit()
+        db.execute("VACUUM"); db.commit()
     except Exception:
         pass
 
