@@ -15,7 +15,7 @@ import openpyxl
 # =============================================================================
 # ENV / Konfiguration
 # =============================================================================
-def _env(key, default=None):
+def _env(key, default=None): 
     return os.getenv(key, default)
 
 def _env_float(key, default):
@@ -52,7 +52,7 @@ PREIS_BIER  = _env_float("PREIS_BIER", 14.01)
 PREIS_ALK   = _env_float("PREIS_ALKOHOLFREI", 6.10)
 PREIS_HENDL = _env_float("PREIS_HENDL", 22.30)
 
-# feste Mitarbeiter-Reihenfolge
+# feste Mitarbeiter-Reihenfolge (dein Wunsch)
 MITARBEITER = [m.strip() for m in os.getenv(
     "MITARBEITER", "Florian,Jonas,Julia,Regina,Schorsch,Toni"
 ).split(",") if m.strip()]
@@ -71,7 +71,7 @@ COUNTDOWN_DEADLINE = datetime(2025, 10, 5, 23, 0, 0)
 # =============================================================================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB Upload-Limit (Restore)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB Upload-Limit
 
 def ensure_db_dir(path):
     p = Path(path)
@@ -239,7 +239,7 @@ def eingabe(datum):
 
     # Speichern (nur wenn entsperrt oder neu & im Editfenster)
     if request.method == "POST" and action == "save" and im_edit and (not row or row["gespeichert"] == 0):
-        # Summe Start: nur am 20.09 oder wenn bestehender Eintrag entsperrt
+        # Summe Start: nur am 20.09. direkt, sonst vom Vortag (oder wenn entsperrt)
         if erster_tag or (row and row["gespeichert"] == 0):
             summe_start = float(request.form.get("summe_start") or 0)
         else:
@@ -273,6 +273,7 @@ def eingabe(datum):
                  steuer, gesamt, bar_entn, tagessumme))
         db.commit()
         flash("Gespeichert ✅")
+        # auf derselben Datum-Seite bleiben
         return redirect(url_for("eingabe", datum=datum))
 
     # Anzeige-Werte
@@ -340,7 +341,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Summe Start (€)</label>
-      <input name="summe_start" type="number" inputmode="decimal" step="0.01"
+      <input name="summe_start" type="number" inputmode="decimal" step="0.01" min="0"
              value="{{ vals['summe_start'] }}"
              class="form-control {% if may_edit_summe %}editable{% else %}readonly{% endif %}"
              {% if not may_edit_summe %}readonly{% endif %}>
@@ -348,7 +349,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Bar (€)</label>
-      <input name="bar" id="bar" type="number" inputmode="decimal" step="0.01"
+      <input name="bar" id="bar" type="number" inputmode="decimal" step="0.01" min="0"
              value="{{ '' if is_new else vals['bar'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -356,7 +357,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-4">
       <label class="form-label">Bier (Anzahl)</label>
-      <input name="bier" id="bier" type="number" inputmode="numeric" step="1"
+      <input name="bier" id="bier" type="number" inputmode="numeric" step="1" min="0"
              value="{{ '' if is_new else vals['bier'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -364,7 +365,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-4">
       <label class="form-label">Alkoholfrei (Anzahl)</label>
-      <input name="alkoholfrei" id="alkoholfrei" type="number" inputmode="numeric" step="1"
+      <input name="alkoholfrei" id="alkoholfrei" type="number" inputmode="numeric" step="1" min="0"
              value="{{ '' if is_new else vals['alkoholfrei'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -372,7 +373,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-4">
       <label class="form-label">Hendl (Anzahl)</label>
-      <input name="hendl" id="hendl" type="number" inputmode="numeric" step="1"
+      <input name="hendl" id="hendl" type="number" inputmode="numeric" step="1" min="0"
              value="{{ '' if is_new else vals['hendl'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -381,7 +382,7 @@ body{background:#f6f7fb;}
     {% if wtag == 2 %}
     <div class="col-12 col-md-6">
       <label class="form-label">Steuer (€) – nur Mittwoch</label>
-      <input name="steuer" id="steuer" type="number" inputmode="decimal" step="0.01"
+      <input name="steuer" id="steuer" type="number" inputmode="decimal" step="0.01" min="0"
              value="{{ '' if is_new else vals['steuer'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -390,7 +391,7 @@ body{background:#f6f7fb;}
 
     <div class="col-12 col-md-6">
       <label class="form-label">Bar entnommen (€)</label>
-      <input name="bar_entnommen" id="bar_entnommen" type="number" inputmode="decimal" step="0.01"
+      <input name="bar_entnommen" id="bar_entnommen" type="number" inputmode="decimal" step="0.01" min="0"
              value="{{ '' if is_new else vals['bar_entnommen'] }}"
              class="form-control {% if (im_edit and not vals['gespeichert']) %}editable{% else %}readonly{% endif %}"
              {% if not (im_edit and not vals['gespeichert']) %}readonly{% endif %}>
@@ -455,6 +456,7 @@ function berechne(){
   if(g) g.value = isFinite(ges) ? ges.toFixed(2) : "";
   if(t) t.value = isFinite(tag) ? tag.toFixed(2) : "";
 }
+window.addEventListener('load', berechne);
 </script>
 
 </body>
@@ -472,10 +474,7 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht
-#   Brutto (Tageswert) = Σ(gesamt) + Σ(bar_entnommen vom Vortag)
-#   Differenz: Tag1 = Brutto − Σ(summe_start am 20.09.), sonst Brutto(heute) − Brutto(gestern)
-#   Extra-Spalte: Summe entnommen (Σ(bar_entnommen) des Tages)
+# Admin-Ansicht (6-Spalten-Logik)
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -486,63 +485,67 @@ def admin_view():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt)        AS brutto_sum,     -- Σ gesamt (Tageswert Roh)
-          SUM(summe_start)   AS start_sum,      -- Σ summe_start (für Start-Zeile am DATA_START)
-          SUM(steuer)        AS steuer_sum,     -- Σ steuer
-          SUM(bar_entnommen) AS entnommen_sum   -- Σ bar_entnommen (heutiger Tag)
+          SUM(gesamt)        AS geldbeutel_sum,   -- Σ gesamt (im Geldbeutel)
+          SUM(bar_entnommen) AS entnommen_sum,    -- Σ Bar entnommen (heute)
+          SUM(steuer)        AS steuer_sum        -- Σ Steuer (heute)
         FROM eintraege
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
-    # Summe der Startwerte am DATA_START (für Start-Zeile und erste Tages-Differenz)
-    start_summe = 0.0
-    for r in rows:
-        if r["datum"] == DATA_START.isoformat():
-            start_summe = float(r["start_sum"] or 0.0)
-            break
+    # Für Gesamtumsatz brauchen wir Entnommen vom Vortag
+    entn_by_date = {r["datum"]: float(r["entnommen_sum"] or 0.0) for r in rows}
 
-    # Map: datum -> entnommen_sum (für Zugriff auf Vortag)
-    entn_map = {r["datum"]: float(r["entnommen_sum"] or 0.0) for r in rows}
+    data = []
+    prev_gesamtumsatz = None
 
-    rows_out = []
-    prev_brutto = None
-    gesamt_diff = 0.0
-    gesamt_steuer = 0.0
+    # Laufende Summen für Footer
+    total_geldbeutel = 0.0
+    total_entnommen = 0.0
+    total_diff = 0.0
+    total_steuer = 0.0
 
     for idx, r in enumerate(rows):
-        datum_str = r["datum"]
-        brutto = float(r["brutto_sum"] or 0.0)  # Σ(gesamt) des Tages
-        steuer = float(r["steuer_sum"] or 0.0)
+        datum = r["datum"]
+        geldbeutel = float(r["geldbeutel_sum"] or 0.0)
         entnommen = float(r["entnommen_sum"] or 0.0)
+        steuer = float(r["steuer_sum"] or 0.0)
 
-        # Brutto + Summe entnommen vom Vortag
-        if idx > 0:
-            vortag = rows[idx-1]["datum"]
-            brutto += entn_map.get(vortag, 0.0)
-
-        # Differenz
+        # Gesamtumsatz = Geldbeutel heute + Entnommen vom Vortag
         if idx == 0:
-            diff = brutto - start_summe
+            gesamtumsatz = geldbeutel  # kein Vortag
         else:
-            diff = brutto - (prev_brutto if prev_brutto is not None else 0.0)
+            vortag = rows[idx - 1]["datum"]
+            gesamtumsatz = geldbeutel + entn_by_date.get(vortag, 0.0)
 
-        rows_out.append({
-            "datum": datum_str,
-            "brutto": brutto,
+        # Differenz zum Vortag
+        if prev_gesamtumsatz is None:
+            diff = None
+            pro_person = None
+        else:
+            diff = gesamtumsatz - prev_gesamtumsatz
+            pro_person = diff / 6.0
+
+        data.append({
+            "datum": datum,
+            "geldbeutel": geldbeutel,
+            "entnommen": entnommen,
+            "gesamtumsatz": gesamtumsatz,
             "diff": diff,
-            "pro_person": diff / 6.0,
+            "pro_person": (None if diff is None else pro_person),
             "steuer": steuer,
-            "entnommen": entnommen
         })
 
-        prev_brutto = brutto
-        gesamt_diff += diff
-        gesamt_steuer += steuer
+        # Tots
+        total_geldbeutel += geldbeutel
+        total_entnommen += entnommen
+        total_steuer += steuer
+        if diff is not None:
+            total_diff += diff
 
-    gesamt_nach_steuer = gesamt_diff - gesamt_steuer
-    gesamt_pp = gesamt_diff / 6.0 if rows_out else 0.0
-    gesamt_pp_nach_steuer = gesamt_nach_steuer / 6.0 if rows_out else 0.0
+        prev_gesamtumsatz = gesamtumsatz
+
+    total_pro_person = (total_diff / 6.0) if data else 0.0
 
     return render_template_string("""
 <!doctype html>
@@ -564,7 +567,7 @@ body{background:#f6f7fb;}
   {% endwith %}
 
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h3 class="mb-0">Gesamtsummen</h3>
+    <h3 class="mb-0">Tagesübersicht</h3>
     <div class="d-flex gap-2">
       <a href="{{ url_for('export_excel') }}" class="btn btn-primary">📥 Excel Export</a>
       <a href="{{ url_for('backup_db') }}" class="btn btn-secondary">📦 SQL Backup</a>
@@ -575,57 +578,40 @@ body{background:#f6f7fb;}
   <div class="card app-card mb-4">
     <div class="card-body p-0">
       <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-hover mb-0 align-middle">
           <thead class="table-light">
             <tr>
               <th>Datum</th>
-              <th>Brutto (Tageswert) (€)</th>
+              <th>Gesamt im Geldbeutel (€)</th>
+              <th>Entnommen (€)</th>
+              <th>Gesamtumsatz (€)</th>
               <th>Differenz (€)</th>
               <th>Umsatz pro Person (€)</th>
               <th>Steuer je Tag (€)</th>
-              <th>Summe entnommen (€)</th>
             </tr>
           </thead>
           <tbody>
-            <!-- Start-Zeile -->
-            <tr class="table-warning fw-semibold">
-              <td>Start</td>
-              <td>{{ "%.2f"|format(start_summe) }}</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-            </tr>
-
             {% for r in rows %}
             <tr>
               <td>{{ r.datum }}</td>
-              <td>{{ "%.2f"|format(r.brutto) }}</td>
-              <td>{{ "%.2f"|format(r.diff) }}</td>
-              <td>{{ "%.2f"|format(r.pro_person) }}</td>
-              <td>{{ "%.2f"|format(r.steuer) }}</td>
+              <td>{{ "%.2f"|format(r.geldbeutel) }}</td>
               <td>{{ "%.2f"|format(r.entnommen) }}</td>
+              <td>{{ "%.2f"|format(r.gesamtumsatz) }}</td>
+              <td>{% if r.diff is none %}-{% else %}{{ "%.2f"|format(r.diff) }}{% endif %}</td>
+              <td>{% if r.pro_person is none %}-{% else %}{{ "%.2f"|format(r.pro_person) }}{% endif %}</td>
+              <td>{{ "%.2f"|format(r.steuer) }}</td>
             </tr>
             {% endfor %}
           </tbody>
           <tfoot>
-            <!-- GESAMT: Brutto leer; Differenz/PP/Steuer gefüllt -->
             <tr class="table-secondary">
               <th>GESAMT</th>
+              <th>{{ "%.2f"|format(total_geldbeutel) }}</th>
+              <th>{{ "%.2f"|format(total_entnommen) }}</th>
               <th></th>
-              <th>{{ "%.2f"|format(gesamt_diff) }}</th>
-              <th>{{ "%.2f"|format(gesamt_pp) }}</th>
-              <th>{{ "%.2f"|format(gesamt_steuer) }}</th>
-              <th></th>
-            </tr>
-            <!-- GESAMT NACH STEUER: Brutto leer; Differenz = Σ Differenzen − Σ Steuern -->
-            <tr class="table-dark">
-              <th>GESAMT NACH STEUER</th>
-              <th></th>
-              <th>{{ "%.2f"|format(gesamt_nach_steuer) }}</th>
-              <th>{{ "%.2f"|format(gesamt_pp_nach_steuer) }}</th>
-              <th></th>
-              <th></th>
+              <th>{{ "%.2f"|format(total_diff) }}</th>
+              <th>{{ "%.2f"|format(total_pro_person) }}</th>
+              <th>{{ "%.2f"|format(total_steuer) }}</th>
             </tr>
           </tfoot>
         </table>
@@ -666,17 +652,16 @@ body{background:#f6f7fb;}
 </body>
 </html>
     """,
-        rows=rows_out,
-        start_summe=start_summe,
-        gesamt_diff=gesamt_diff,
-        gesamt_pp=gesamt_pp,
-        gesamt_steuer=gesamt_steuer,
-        gesamt_nach_steuer=gesamt_nach_steuer,
-        gesamt_pp_nach_steuer=gesamt_pp_nach_steuer
+        rows=data,
+        total_geldbeutel=total_geldbeutel,
+        total_entnommen=total_entnommen,
+        total_diff=total_diff,
+        total_pro_person=total_pro_person,
+        total_steuer=total_steuer
     )
 
 # =============================================================================
-# Excel-Export – identische Logik wie Admin inkl. „Summe entnommen“ & Start-Zeile
+# Excel-Export – exakt wie Admin-Ansicht
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -687,68 +672,84 @@ def export_excel():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt)        AS brutto_sum,
-          SUM(summe_start)   AS start_sum,
-          SUM(steuer)        AS steuer_sum,
-          SUM(bar_entnommen) AS entnommen_sum
+          SUM(gesamt)        AS geldbeutel_sum,
+          SUM(bar_entnommen) AS entnommen_sum,
+          SUM(steuer)        AS steuer_sum
         FROM eintraege
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
-    # Startsumme (20.09)
-    start_summe = 0.0
-    for r in rows:
-        if r["datum"] == DATA_START.isoformat():
-            start_summe = float(r["start_sum"] or 0.0)
-            break
-
-    entn_map = {r["datum"]: float(r["entnommen_sum"] or 0.0) for r in rows}
+    entn_by_date = {r["datum"]: float(r["entnommen_sum"] or 0.0) for r in rows}
 
     data = []
-    prev_brutto = None
+    prev_gesamtumsatz = None
+    total_geldbeutel = 0.0
+    total_entnommen = 0.0
     total_diff = 0.0
-    total_tax = 0.0
-
-    # Start-Zeile (wie in Admin)
-    data.append(("Start", start_summe, None, None, None, None))
+    total_steuer = 0.0
 
     for idx, r in enumerate(rows):
-        brutto = float(r["brutto_sum"] or 0.0)         # Σ(gesamt)
-        steuer = float(r["steuer_sum"] or 0.0)
+        datum = r["datum"]
+        geldbeutel = float(r["geldbeutel_sum"] or 0.0)
         entnommen = float(r["entnommen_sum"] or 0.0)
-
-        if idx > 0:  # Vortag entnommen addieren
-            vortag = rows[idx-1]["datum"]
-            brutto += entn_map.get(vortag, 0.0)
+        steuer = float(r["steuer_sum"] or 0.0)
 
         if idx == 0:
-            diff = brutto - start_summe
+            gesamtumsatz = geldbeutel
         else:
-            diff = brutto - (prev_brutto if prev_brutto is not None else 0.0)
+            vortag = rows[idx - 1]["datum"]
+            gesamtumsatz = geldbeutel + entn_by_date.get(vortag, 0.0)
 
-        pp = diff / 6.0
+        if prev_gesamtumsatz is None:
+            diff = None
+            pp = None
+        else:
+            diff = gesamtumsatz - prev_gesamtumsatz
+            pp = diff / 6.0
 
-        data.append((r["datum"], brutto, diff, pp, steuer, entnommen))
+        data.append((datum, geldbeutel, entnommen, gesamtumsatz, diff, pp, steuer))
 
-        prev_brutto = brutto
-        total_diff += diff
-        total_tax += steuer
+        total_geldbeutel += geldbeutel
+        total_entnommen += entnommen
+        total_steuer += steuer
+        if diff is not None:
+            total_diff += diff
 
-    total_diff_after_tax = total_diff - total_tax
+        prev_gesamtumsatz = gesamtumsatz
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Gesamtsummen"
-    ws.append(["Datum", "Brutto (Tageswert €)", "Differenz (€)", "Umsatz/Person (€)", "Steuer je Tag (€)", "Summe entnommen (€)"])
-    for d, b, diff, pp, st, entn in data:
-        ws.append([d, b, "" if diff is None else diff, "" if pp is None else pp, "" if st is None else st, "" if entn is None else entn])
-
+    ws.title = "Tagesübersicht"
+    ws.append([
+        "Datum",
+        "Gesamt im Geldbeutel (€)",
+        "Entnommen (€)",
+        "Gesamtumsatz (€)",
+        "Differenz (€)",
+        "Umsatz/Person (€)",
+        "Steuer je Tag (€)"
+    ])
+    for d, gb, entn, gu, diff, pp, st in data:
+        ws.append([
+            d,
+            gb,
+            entn,
+            gu,
+            "" if diff is None else diff,
+            "" if pp is None else pp,
+            st
+        ])
     ws.append([])
-    # Footer GESAMT: Brutto leer
-    ws.append(["GESAMT", "", total_diff, total_diff/6.0, total_tax, ""])
-    # Footer NACH STEUER: Brutto leer; Differenz = Σ Diff − Σ Steuer
-    ws.append(["GESAMT NACH STEUER", "", total_diff_after_tax, total_diff_after_tax/6.0, "", ""])
+    ws.append([
+        "GESAMT",
+        total_geldbeutel,
+        total_entnommen,
+        "",
+        total_diff,
+        (total_diff/6.0) if data else 0.0,
+        total_steuer
+    ])
 
     out = BytesIO()
     wb.save(out)
@@ -795,6 +796,14 @@ def restore_db():
         except Exception: pass
         return "Ungültige SQLite-Datei.", 400
 
+    # Sicherung der aktuellen DB (optional)
+    if os.path.exists(DB_PATH):
+        backup_path = f"{DB_PATH}.bak_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        try:
+            shutil.copy2(DB_PATH, backup_path)
+        except Exception:
+            pass
+
     shutil.copy2(tmp, DB_PATH)
     os.remove(tmp)
     with app.app_context():
@@ -836,4 +845,5 @@ def hard_reset():
 # Start
 # =============================================================================
 if __name__ == "__main__":
+    
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
