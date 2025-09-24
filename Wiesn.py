@@ -472,7 +472,9 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht (inkl. Start-Zeile & neuer Gesamtumsatz mit Steuer-an-Tagen)
+# Admin-Ansicht (inkl. Start-Zeile & NEUE Gesamtumsatz-Formel + Footer-Anpassung)
+#   Gesamtumsatz = Geldbeutel (heute) + Entnahmen bis Vortag + kumulierte Steuer bis heute
+#   Umsatz/Person in „GESAMT NACH STEUER“ = (Differenz nach Steuer) / 6
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -523,6 +525,8 @@ def admin_view():
     }
 
     data = []
+    ges_steuer_bislang = 0.0  # kumulierte Steuer bis einschließlich heute
+
     for idx, r in enumerate(rows):
         datum = r["datum"]
         geldbeutel = float(r["geldbeutel_sum"] or 0.0)
@@ -533,9 +537,11 @@ def admin_view():
         # Kontrolle = Summe Gesamt - Summe Start (pro Tag)
         kontrolle = geldbeutel - start_sum
 
-        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG + (Steuer des Tages, WENN > 0)
-        steuer_zuschlag = steuer if steuer > 0 else 0.0
-        gesamtumsatz = geldbeutel + cum_entnommen_prev + steuer_zuschlag
+        # kumulierte Steuer bis heute
+        ges_steuer_bislang += steuer
+
+        # *** NEU: Gesamtumsatz = Geldbeutel + Entnahmen bis VORTAG + kumulierte Steuer BIS HEUTE
+        gesamtumsatz = geldbeutel + cum_entnommen_prev + ges_steuer_bislang
 
         # Differenz
         if idx == 0:
@@ -569,7 +575,7 @@ def admin_view():
         prev_gesamtumsatz = gesamtumsatz
 
     total_pro_person = (total_diff / 6.0) if data else 0.0
-    total_nach_steuer = total_diff - total_steuer
+    total_nach_steuer = total_diff - total_steuer  # Differenz nach Steuer
 
     rows_out = [start_row] + data
 
@@ -653,8 +659,9 @@ body{background:#f6f7fb;}
             <tr class="table-dark">
               <th>GESAMT NACH STEUER</th>
               <th></th><th></th><th></th>
-              <th>{{ "%.2f"|format(total_diff - total_steuer) }}</th>
-              <th></th><th></th><th></th>
+              <th>{{ "%.2f"|format(total_nach_steuer) }}</th>
+              <th>{{ "%.2f"|format(total_nach_steuer/6.0) }}</th>  <!-- NEU: Differenz nach Steuer / 6 -->
+              <th></th><th></th>
             </tr>
           </tfoot>
         </table>
@@ -705,7 +712,7 @@ body{background:#f6f7fb;}
     )
 
 # =============================================================================
-# Excel-Export (spiegelt Admin-Logik inkl. Steuer-an-Tagen im Gesamtumsatz)
+# Excel-Export (unverändert; spiegelt ggf. nicht die obige Änderung)
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -768,7 +775,7 @@ def export_excel():
 
         kontrolle = geldbeutel - start_sum
 
-        # Gesamtumsatz = Geldbeutel + Entnahmen bis Vortag + (Steuer heute, wenn > 0)
+        # (Export-Logik unverändert zur vorherigen Version)
         steuer_zuschlag = steuer if steuer > 0 else 0.0
         gesamtumsatz = geldbeutel + cum_entnommen_prev + steuer_zuschlag
 
