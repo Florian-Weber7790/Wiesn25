@@ -471,7 +471,7 @@ window.addEventListener('load', berechne);
     )
 
 # =============================================================================
-# Admin-Ansicht (angepasste Gesamtumsatz-Logik)
+# Admin-Ansicht (Gesamtumsatz-Logik + zusätzl. Footerzeile „GESAMT NACH STEUER“)
 #   Gesamtumsatz = Geldbeutel (heute) + Summe Entnahmen bis Vortag + kumulierte Steuer bis heute
 # =============================================================================
 @app.route("/admin")
@@ -599,6 +599,17 @@ def admin_view():
           <th>{{ "%.2f"|format(sum_diff/6.0) }}</th>
           <th>{{ "%.2f"|format(sum_steuer) }}</th>
           <th>{{ "%.2f"|format(sum_kontrolle) }}</th>
+        </tr>
+        <!-- NEU: Gesamt nach Steuer – Umsatz/Person = Differenz/6 -->
+        <tr class="table-dark">
+          <th>GESAMT NACH STEUER</th>
+          <th></th>
+          <th></th>
+          <th></th>
+          <th></th>
+          <th>{{ "%.2f"|format(sum_diff/6.0) }}</th>
+          <th></th>
+          <th></th>
         </tr>
       </tfoot>
     </table>
