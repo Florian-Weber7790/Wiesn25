@@ -472,7 +472,7 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht (mit Start-Zeile, neuem Footer-Verhalten)
+# Admin-Ansicht (inkl. Start-Zeile & neuer Gesamtumsatz mit Steuer-an-Tagen)
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -533,8 +533,9 @@ def admin_view():
         # Kontrolle = Summe Gesamt - Summe Start (pro Tag)
         kontrolle = geldbeutel - start_sum
 
-        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG
-        gesamtumsatz = geldbeutel + cum_entnommen_prev
+        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG + (Steuer des Tages, WENN > 0)
+        steuer_zuschlag = steuer if steuer > 0 else 0.0
+        gesamtumsatz = geldbeutel + cum_entnommen_prev + steuer_zuschlag
 
         # Differenz
         if idx == 0:
@@ -704,7 +705,7 @@ body{background:#f6f7fb;}
     )
 
 # =============================================================================
-# Excel-Export (spiegelt Admin-Logik inkl. Footer)
+# Excel-Export (spiegelt Admin-Logik inkl. Steuer-an-Tagen im Gesamtumsatz)
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -766,7 +767,10 @@ def export_excel():
         start_sum = float(r["start_sum"] or 0.0)
 
         kontrolle = geldbeutel - start_sum
-        gesamtumsatz = geldbeutel + cum_entnommen_prev
+
+        # Gesamtumsatz = Geldbeutel + Entnahmen bis Vortag + (Steuer heute, wenn > 0)
+        steuer_zuschlag = steuer if steuer > 0 else 0.0
+        gesamtumsatz = geldbeutel + cum_entnommen_prev + steuer_zuschlag
 
         if idx == 0:
             diff = gesamtumsatz - start_sum
