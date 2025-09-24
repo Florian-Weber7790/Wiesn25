@@ -15,8 +15,7 @@ import openpyxl
 # =============================================================================
 # ENV / Konfiguration
 # =============================================================================
-def _env(key, default=None): 
-    return os.getenv(key, default)
+def _env(key, default=None): return os.getenv(key, default)
 
 def _env_float(key, default):
     try:
@@ -418,7 +417,6 @@ body{background:#f6f7fb;}
       {% endif %}
     </div>
   </div>
-  <input type="hidden" name="action" value="save">
 </form>
 
 <div class="mt-3 text-center">
@@ -455,6 +453,7 @@ function berechne(){
   if(g) g.value = isFinite(ges) ? ges.toFixed(2) : "";
   if(t) t.value = isFinite(tag) ? tag.toFixed(2) : "";
 }
+window.addEventListener('load', berechne);
 </script>
 
 </body>
@@ -472,7 +471,8 @@ function berechne(){
     )
 
 # =============================================================================
-# Admin-Ansicht (inkl. Start-Zeile & neuer Gesamtumsatz mit Steuer-an-Tagen)
+# Admin-Ansicht (angepasste Gesamtumsatz-Logik)
+#   Gesamtumsatz = Geldbeutel (heute) + Summe Entnahmen bis Vortag + kumulierte Steuer bis heute
 # =============================================================================
 @app.route("/admin")
 def admin_view():
@@ -483,107 +483,67 @@ def admin_view():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt)        AS geldbeutel_sum,   -- Σ gesamt (im Geldbeutel)
-          SUM(bar_entnommen) AS entnommen_sum,    -- Σ Bar entnommen (heute)
-          SUM(steuer)        AS steuer_sum,       -- Σ Steuer (heute)
-          SUM(summe_start)   AS start_sum         -- Σ Summe Start (heute)
+          SUM(gesamt)        AS geldbeutel,
+          SUM(bar_entnommen) AS entnommen,
+          SUM(steuer)        AS steuer
         FROM eintraege
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
-    if not rows:
-        flash("Noch keine Daten vorhanden.")
-        return render_template_string("<p class='p-3'>Keine Daten.</p>")
-
-    # Kumulative Entnahme — für die Tagesberechnung wird NUR bis Vortag verwendet.
-    cum_entnommen_prev = 0.0  # Summe Entnahmen bis zum Vortag
-    prev_gesamtumsatz = None
-
-    # Laufende Summen für Footer
-    total_entnommen = 0.0
-    total_diff = 0.0
-    total_steuer = 0.0
-    total_kontrolle = 0.0
-    last_gesamtumsatz = 0.0  # im Footer „Gesamtumsatz“ = letzter Tageswert
-
-    # Start-Zeile
-    first = rows[0]
-    first_start_sum = float(first["start_sum"] or 0.0)
-    start_row = {
-        "is_start": True,
-        "datum": "Start",
-        "geldbeutel": first_start_sum,  # zeigt Summe Start (Tag 1) in der 1. Spalte
-        "entnommen": None,
-        "gesamtumsatz": None,
-        "diff": None,
-        "pro_person": None,
-        "steuer": None,
-        "kontrolle": None
-    }
-
     data = []
-    for idx, r in enumerate(rows):
-        datum = r["datum"]
-        geldbeutel = float(r["geldbeutel_sum"] or 0.0)
-        entnommen = float(r["entnommen_sum"] or 0.0)
-        steuer = float(r["steuer_sum"] or 0.0)
-        start_sum = float(r["start_sum"] or 0.0)
+    ges_steuer_bislang = 0.0
+    prev_gesamtumsatz = 0.0
 
-        # Kontrolle = Summe Gesamt - Summe Start (pro Tag)
-        kontrolle = geldbeutel - start_sum
+    for r in rows:
+        geld   = float(r["geldbeutel"] or 0)
+        entn   = float(r["entnommen"] or 0)
+        steuer = float(r["steuer"] or 0)
 
-        # Gesamtumsatz = Geldbeutel(heute) + kumulative Entnahme BIS VORTAG + (Steuer des Tages, WENN > 0)
-        steuer_zuschlag = steuer if steuer > 0 else 0.0
-        gesamtumsatz = geldbeutel + cum_entnommen_prev + steuer_zuschlag
+        # kumulierte Steuer bis einschließlich heute
+        ges_steuer_bislang += steuer
 
-        # Differenz
-        if idx == 0:
-            diff = gesamtumsatz - start_sum
-        else:
-            diff = gesamtumsatz - (prev_gesamtumsatz or 0.0)
+        # Gesamtumsatz = Geldbeutel + kumuliert Entnommen bis Vortag + kumuliert Steuer bis heute
+        kum_entn_bis_vortag = sum(d["entnommen"] for d in data)
+        gesamtumsatz = geld + kum_entn_bis_vortag + ges_steuer_bislang
 
-        pro_person = diff / 6.0
+        diff = gesamtumsatz - prev_gesamtumsatz
+        pro_person = diff / 6.0 if diff is not None else 0.0
+
+        # Kontrolle = aktueller Gesamtumsatz – Summe aller Startwerte (bis inkl. heute)
+        start_summe = db.execute(
+            "SELECT SUM(summe_start) FROM eintraege WHERE datum<=?",
+            (r["datum"],)
+        ).fetchone()[0] or 0.0
+        kontrolle = gesamtumsatz - start_summe
 
         data.append({
-            "is_start": False,
-            "datum": datum,
-            "geldbeutel": geldbeutel,
-            "entnommen": entnommen,
+            "datum": r["datum"],
+            "geldbeutel": geld,
+            "entnommen": entn,
             "gesamtumsatz": gesamtumsatz,
             "diff": diff,
             "pro_person": pro_person,
             "steuer": steuer,
             "kontrolle": kontrolle
         })
-
-        # Footer-Summen
-        total_entnommen += entnommen
-        total_steuer += steuer
-        total_diff += diff
-        total_kontrolle += kontrolle
-        last_gesamtumsatz = gesamtumsatz  # für Footer „Gesamtumsatz“ = letzter Tageswert
-
-        # Update für nächsten Tag: ab morgen zählt auch die heutige Entnahme
-        cum_entnommen_prev += entnommen
         prev_gesamtumsatz = gesamtumsatz
 
-    total_pro_person = (total_diff / 6.0) if data else 0.0
-    total_nach_steuer = total_diff - total_steuer
-
-    rows_out = [start_row] + data
+    # Gesamtsummen für Footer
+    sum_geld      = sum(d["geldbeutel"] for d in data)
+    sum_entnommen = sum(d["entnommen"]  for d in data)
+    sum_diff      = sum(d["diff"]       for d in data)
+    sum_steuer    = sum(d["steuer"]     for d in data)
+    sum_kontrolle = sum(d["kontrolle"]  for d in data)
 
     return render_template_string("""
 <!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <title>Admin</title>
-<style>
-body{background:#f6f7fb;}
-.app-card{background:#fff;border:1px solid rgba(13,110,253,.08);box-shadow:0 10px 30px rgba(0,0,0,.05);border-radius:14px;}
-</style>
 </head>
 <body class="container py-4">
   {% with msgs = get_flashed_messages() %}
@@ -593,7 +553,7 @@ body{background:#f6f7fb;}
   {% endwith %}
 
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h3 class="mb-0">Tagesübersicht</h3>
+    <h3 class="mb-0">Admin – Tagesübersicht</h3>
     <div class="d-flex gap-2">
       <a href="{{ url_for('export_excel') }}" class="btn btn-primary">📥 Excel Export</a>
       <a href="{{ url_for('backup_db') }}" class="btn btn-secondary">📦 SQL Backup</a>
@@ -601,111 +561,84 @@ body{background:#f6f7fb;}
     </div>
   </div>
 
-  <div class="card app-card mb-4">
-    <div class="card-body p-0">
-      <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-          <thead class="table-light">
-            <tr>
-              <th>Datum</th>
-              <th>Gesamt im Geldbeutel (€)</th>
-              <th>Entnommen (€)</th>
-              <th>Gesamtumsatz (€)</th>
-              <th>Differenz (€)</th>
-              <th>Umsatz pro Person (€)</th>
-              <th>Steuer je Tag (€)</th>
-              <th>Kontrolle (€)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in rows %}
-            {% if r.is_start %}
-              <tr class="table-info">
-                <td class="fw-semibold">Start</td>
-                <td>{{ "%.2f"|format(r.geldbeutel) }}</td>
-                <td></td><td></td><td></td><td></td><td></td><td></td>
-              </tr>
-            {% else %}
-              <tr>
-                <td>{{ r.datum }}</td>
-                <td>{{ "%.2f"|format(r.geldbeutel) }}</td>
-                <td>{{ "%.2f"|format(r.entnommen) }}</td>
-                <td>{{ "%.2f"|format(r.gesamtumsatz) }}</td>
-                <td>{{ "%.2f"|format(r.diff) }}</td>
-                <td>{{ "%.2f"|format(r.pro_person) }}</td>
-                <td>{{ "%.2f"|format(r.steuer) }}</td>
-                <td>{{ "%.2f"|format(r.kontrolle) }}</td>
-              </tr>
-            {% endif %}
-            {% endfor %}
-          </tbody>
-          <tfoot>
-            <tr class="table-secondary">
-              <th>GESAMT</th>
-              <th></th>  <!-- kein Addieren der 1. Spalte -->
-              <th>{{ "%.2f"|format(total_entnommen) }}</th>
-              <th>{{ "%.2f"|format(last_gesamtumsatz) }}</th> <!-- letzter Tageswert -->
-              <th>{{ "%.2f"|format(total_diff) }}</th>
-              <th>{{ "%.2f"|format(total_pro_person) }}</th>
-              <th>{{ "%.2f"|format(total_steuer) }}</th>
-              <th>{{ "%.2f"|format(total_kontrolle) }}</th> <!-- Summe Kontrolle -->
-            </tr>
-            <tr class="table-dark">
-              <th>GESAMT NACH STEUER</th>
-              <th></th><th></th><th></th>
-              <th>{{ "%.2f"|format(total_diff - total_steuer) }}</th>
-              <th></th><th></th><th></th>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Datum</th>
+          <th>Gesamt im Geldbeutel (€)</th>
+          <th>Entnommen (€)</th>
+          <th>Gesamtumsatz inkl. Steuer (€)</th>
+          <th>Differenz (€)</th>
+          <th>Umsatz / Person (€)</th>
+          <th>Steuer je Tag (€)</th>
+          <th>Kontrolle (€)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in data %}
+        <tr>
+          <td>{{ d.datum }}</td>
+          <td>{{ "%.2f"|format(d.geldbeutel) }}</td>
+          <td>{{ "%.2f"|format(d.entnommen) }}</td>
+          <td>{{ "%.2f"|format(d.gesamtumsatz) }}</td>
+          <td>{{ "%.2f"|format(d.diff) }}</td>
+          <td>{{ "%.2f"|format(d.pro_person) }}</td>
+          <td>{{ "%.2f"|format(d.steuer) }}</td>
+          <td>{{ "%.2f"|format(d.kontrolle) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="table-secondary">
+        <tr>
+          <th>GESAMT</th>
+          <th>{{ "%.2f"|format(sum_geld) }}</th>
+          <th>{{ "%.2f"|format(sum_entnommen) }}</th>
+          <th>{{ "%.2f"|format(prev_gesamtumsatz) }}</th>
+          <th>{{ "%.2f"|format(sum_diff) }}</th>
+          <th>{{ "%.2f"|format(sum_diff/6.0) }}</th>
+          <th>{{ "%.2f"|format(sum_steuer) }}</th>
+          <th>{{ "%.2f"|format(sum_kontrolle) }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
 
-    <div class="card-footer">
-      <form action="{{ url_for('restore_db') }}" method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 mb-3">
-        <input type="file" name="file" accept=".sqlite,.db" class="form-control" style="max-width:420px" required>
-        <button type="submit" class="btn btn-danger"
-                onclick="return confirm('Achtung: Aktuelle Datenbank wird ersetzt. Fortfahren?')">🔁 Restore</button>
-      </form>
-
-      <div class="border rounded p-3" style="border-color: rgba(220,53,69,.35)!important;">
-        <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
-        <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong>.</p>
-        <form action="{{ url_for('hard_reset') }}" method="post" class="row g-2 align-items-center">
-          <div class="col-12 col-md-4">
-            <input type="password" name="confirm_pw" class="form-control" placeholder="Admin-Passwort" required autocomplete="current-password">
-          </div>
-          <div class="col-12 col-md-5">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="confirm_reset" name="confirm_reset" value="1" required>
-              <label class="form-check-label" for="confirm_reset">Ich bestätige, dass alle Daten gelöscht werden sollen.</label>
-            </div>
-          </div>
-          <div class="col-12 col-md-3">
-            <button type="submit" class="btn btn-outline-danger w-100"
-                    onclick="return confirm('Wirklich ALLE Daten löschen?')">
-              ⚠️ Komplett-Reset
-            </button>
-          </div>
-        </form>
+  <div class="border rounded p-3 mt-3" style="border-color: rgba(220,53,69,.35)!important;">
+    <h5 class="text-danger mb-2">Komplett-Reset (alle Daten löschen)</h5>
+    <p class="mb-2">Dieser Vorgang löscht unwiderruflich <strong>alle Einträge</strong>.</p>
+    <form action="{{ url_for('hard_reset') }}" method="post" class="row g-2 align-items-center">
+      <div class="col-12 col-md-4">
+        <input type="password" name="confirm_pw" class="form-control" placeholder="Admin-Passwort" required autocomplete="current-password">
       </div>
-    </div>
+      <div class="col-12 col-md-5">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="confirm_reset" name="confirm_reset" value="1" required>
+          <label class="form-check-label" for="confirm_reset">Ich bestätige, dass alle Daten gelöscht werden sollen.</label>
+        </div>
+      </div>
+      <div class="col-12 col-md-3">
+        <button type="submit" class="btn btn-outline-danger w-100"
+                onclick="return confirm('Wirklich ALLE Daten löschen?')">
+          ⚠️ Komplett-Reset
+        </button>
+      </div>
+    </form>
   </div>
 </body>
 </html>
     """,
-        rows=rows_out,
-        total_entnommen=total_entnommen,
-        total_diff=total_diff,
-        total_pro_person=total_pro_person,
-        total_steuer=total_steuer,
-        total_nach_steuer=total_nach_steuer,
-        total_kontrolle=total_kontrolle,
-        last_gesamtumsatz=last_gesamtumsatz
+        data=data,
+        sum_geld=sum_geld,
+        sum_entnommen=sum_entnommen,
+        sum_diff=sum_diff,
+        sum_steuer=sum_steuer,
+        sum_kontrolle=sum_kontrolle,
+        prev_gesamtumsatz=prev_gesamtumsatz
     )
 
 # =============================================================================
-# Excel-Export (spiegelt Admin-Logik inkl. Steuer-an-Tagen im Gesamtumsatz)
+# Excel-Export (unverändert zur letzten Version mit Admin-Tabelle)
 # =============================================================================
 @app.route("/export_excel")
 def export_excel():
@@ -716,101 +649,57 @@ def export_excel():
     rows = db.execute("""
         SELECT
           datum,
-          SUM(gesamt)        AS geldbeutel_sum,
-          SUM(bar_entnommen) AS entnommen_sum,
-          SUM(steuer)        AS steuer_sum,
-          SUM(summe_start)   AS start_sum
+          SUM(gesamt)        AS geldbeutel,
+          SUM(bar_entnommen) AS entnommen,
+          SUM(steuer)        AS steuer
         FROM eintraege
         GROUP BY datum
         ORDER BY datum
     """).fetchall()
 
+    data = []
+    ges_steuer_bislang = 0.0
+    prev_gesamtumsatz = 0.0
+
+    for r in rows:
+        geld   = float(r["geldbeutel"] or 0.0)
+        entn   = float(r["entnommen"]  or 0.0)
+        steuer = float(r["steuer"]     or 0.0)
+
+        ges_steuer_bislang += steuer
+        kum_entn_bis_vortag = sum(d[2] for d in data)  # d[2] = entnommen
+        gesamtumsatz = geld + kum_entn_bis_vortag + ges_steuer_bislang
+
+        diff = gesamtumsatz - prev_gesamtumsatz
+        pro_person = diff / 6.0 if diff is not None else 0.0
+
+        # Kontrolle
+        start_summe = db.execute(
+            "SELECT SUM(summe_start) FROM eintraege WHERE datum<=?",
+            (r["datum"],)
+        ).fetchone()[0] or 0.0
+        kontrolle = gesamtumsatz - start_summe
+
+        data.append((r["datum"], geld, entn, gesamtumsatz, diff, pro_person, steuer, kontrolle))
+        prev_gesamtumsatz = gesamtumsatz
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Tagesübersicht"
+    ws.append(["Datum", "Gesamt Geldbeutel (€)", "Entnommen (€)", "Gesamtumsatz inkl. Steuer (€)",
+               "Differenz (€)", "Umsatz/Person (€)", "Steuer je Tag (€)", "Kontrolle (€)"])
+    for d in data:
+        ws.append(list(d))
 
-    ws.append([
-        "Datum",
-        "Gesamt im Geldbeutel (€)",
-        "Entnommen (€)",
-        "Gesamtumsatz (€)",
-        "Differenz (€)",
-        "Umsatz/Person (€)",
-        "Steuer je Tag (€)",
-        "Kontrolle (€)"
-    ])
-
-    if not rows:
-        out = BytesIO(); wb.save(out); out.seek(0)
-        return send_file(out, as_attachment=True,
-                         download_name=f"Wiesn25_Gesamt_{date.today().isoformat()}.xlsx",
-                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # Start-Zeile
-    first_start_sum = float(rows[0]["start_sum"] or 0.0)
-    ws.append(["Start", first_start_sum, "", "", "", "", "", ""])
-
-    cum_entnommen_prev = 0.0
-    prev_gesamtumsatz = None
-
-    total_entnommen = 0.0
-    total_diff = 0.0
-    total_steuer = 0.0
-    total_kontrolle = 0.0
-    last_gesamtumsatz = 0.0
-
-    for idx, r in enumerate(rows):
-        datum = r["datum"]
-        geldbeutel = float(r["geldbeutel_sum"] or 0.0)
-        entnommen = float(r["entnommen_sum"] or 0.0)
-        steuer = float(r["steuer_sum"] or 0.0)
-        start_sum = float(r["start_sum"] or 0.0)
-
-        kontrolle = geldbeutel - start_sum
-
-        # Gesamtumsatz = Geldbeutel + Entnahmen bis Vortag + (Steuer heute, wenn > 0)
-        steuer_zuschlag = steuer if steuer > 0 else 0.0
-        gesamtumsatz = geldbeutel + cum_entnommen_prev + steuer_zuschlag
-
-        if idx == 0:
-            diff = gesamtumsatz - start_sum
-        else:
-            diff = gesamtumsatz - (prev_gesamtumsatz or 0.0)
-
-        pp = diff / 6.0
-
-        ws.append([datum, geldbeutel, entnommen, gesamtumsatz, diff, pp, steuer, kontrolle])
-
-        total_entnommen += entnommen
-        total_diff += diff
-        total_steuer += steuer
-        total_kontrolle += kontrolle
-        last_gesamtumsatz = gesamtumsatz
-
-        cum_entnommen_prev += entnommen
-        prev_gesamtumsatz = gesamtumsatz
+    # Footer
+    sum_geld      = sum(x[1] for x in data)
+    sum_entn      = sum(x[2] for x in data)
+    sum_diff      = sum(x[4] for x in data)
+    sum_steuer    = sum(x[6] for x in data)
+    sum_kontrolle = sum(x[7] for x in data)
 
     ws.append([])
-    ws.append([
-        "GESAMT",
-        "",  # kein Addieren von „Gesamt im Geldbeutel“
-        total_entnommen,
-        last_gesamtumsatz,  # letzter Tageswert
-        total_diff,
-        (total_diff/6.0) if rows else 0.0,
-        total_steuer,
-        total_kontrolle  # Summe Kontrolle
-    ])
-    ws.append([
-        "GESAMT NACH STEUER",
-        "",
-        "",
-        "",
-        total_diff - total_steuer,
-        "",
-        "",
-        ""
-    ])
+    ws.append(["GESAMT", sum_geld, sum_entn, prev_gesamtumsatz, sum_diff, sum_diff/6.0, sum_steuer, sum_kontrolle])
 
     out = BytesIO()
     wb.save(out)
@@ -849,7 +738,9 @@ def restore_db():
     f.save(tmp)
     # Basic validity check
     try:
-        t = sqlite3.connect(tmp); t.execute("PRAGMA schema_version;"); t.close()
+        t = sqlite3.connect(tmp)
+        t.execute("PRAGMA schema_version;")
+        t.close()
     except Exception:
         try: os.remove(tmp)
         except Exception: pass
@@ -884,7 +775,8 @@ def hard_reset():
     db.execute("DELETE FROM eintraege")
     db.commit()
     try:
-        db.execute("VACUUM"); db.commit()
+        db.execute("VACUUM")
+        db.commit()
     except Exception:
         pass
 
